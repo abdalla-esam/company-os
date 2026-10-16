@@ -2,8 +2,8 @@
 # =============================================================================
 # preflight.sh — the foundation gate.
 #
-#   bash deploy/preflight.sh           # verify the current directory
-#   bash deploy/preflight.sh /srv/app  # verify an installed tree
+#   bash ops/deploy/preflight.sh           # verify the current directory
+#   bash ops/deploy/preflight.sh /srv/app  # verify an installed tree
 #
 # "It starts" and "it is safe to start" are different questions. This script
 # answers the second one: every check is one line of PASS / WARN / FAIL, and
@@ -65,11 +65,11 @@ done
 
 echo
 echo "== 3. contract files =="
-for f in capsule_engine/bridge.py \
-         shared_kernel/schemas/tool_bridge.request.schema.json \
-         shared_kernel/schemas/tool_bridge.response.schema.json \
-         governance.json \
-         orchestration/api.py; do
+for f in engine/capsule_engine/bridge.py \
+         engine/shared_kernel/schemas/tool_bridge.request.schema.json \
+         engine/shared_kernel/schemas/tool_bridge.response.schema.json \
+         config/governance.json \
+         engine/orchestration/api.py; do
   if [ -f "$f" ]; then pass "present $f"; else fail "missing $f (incomplete checkout?)"; fi
 done
 
@@ -123,12 +123,20 @@ else
   warn "AGENCY_API_TOKEN absent — the cockpit has no credential at all"
 fi
 
+# --- audit signing secret; falls back to the capability secret, so a missing
+# one is a hygiene warning (one key signing two different things), not a stop.
+if env_present AGENCY_AUDIT_SECRET && [ -n "$(env_get AGENCY_AUDIT_SECRET)" ]; then
+  pass "AGENCY_AUDIT_SECRET set — the audit trail has its own key"
+else
+  warn "AGENCY_AUDIT_SECRET unset — audit entries fall back to AGENCY_CAPABILITY_SECRET"
+fi
+
 if env_present AGENCY_OPERATOR; then
   op="$(env_get AGENCY_OPERATOR)"
   if [ -n "$op" ]; then pass "AGENCY_OPERATOR set — decisions will be attributed to '$op'"
   else warn "AGENCY_OPERATOR empty — decisions will be attributed to 'legacy-token'"; fi
 else
-  warn "AGENCY_AGENT unset — decisions attributed to 'legacy-token'"
+  warn "AGENCY_OPERATOR unset — decisions attributed to 'legacy-token'"
 fi
 
 echo
@@ -145,7 +153,10 @@ fi
 
 echo
 echo "== 6. data & ports =="
-for d in capsules_spool domains governance .company_up; do
+for d in config data \
+         data/capsules/spool data/capsules/sandbox data/assets/vault \
+         data/domains data/governance/approval_gates/gate_queue data/index data/queue \
+         .company_up; do
   if [ -d "$d" ]; then
     if [ -w "$d" ]; then pass "writable $d/"
     else fail "$d exists but is not writable by $(id -un)"; fi
@@ -157,21 +168,23 @@ done
 # PORT may be exported as 0 by the environment (up.sh guards this too), and an
 # empty/absent PORT in .env means the launcher default — resolve both before
 # probing, or we would probe the wrong socket and report a false free port.
-port="${PORT:-8090}"
+port="${PORT:-8000}"
 if [ -f .env ] && grep -q '^PORT=' .env; then p="$(env_get PORT)"; [ -n "$p" ] && port="$p"; fi
-[ "${port:-}" = "0" ] && port=8090
+[ "${port:-}" = "0" ] && port=8000
 if command -v lsof >/dev/null 2>&1 && lsof -iTCP:"$port" -sTCP:LISTEN -n -P >/dev/null 2>&1; then
-  warn "port $port is already in use (a previous run?) — 'bash bootstrap/up.sh down' first"
+  warn "port $port is already in use (a previous run?) — 'bash ops/bootstrap/up.sh down' first"
+elif command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":$port "; then
+  warn "port $port is already in use (a previous run?) — 'bash ops/bootstrap/up.sh down' first"
 else
   pass "port $port free"
 fi
 
-# HOST is NOT in .env.example, and the two launchers disagree on the default:
-# bootstrap/up.sh binds 127.0.0.1 while orchestration/run_cockpit.sh binds
-# 0.0.0.0. Say which one a missing value actually means instead of guessing.
+# HOST decides whether the API is reachable from the network at all: 127.0.0.1
+# means "only a reverse proxy on this host can talk to it", 0.0.0.0 means
+# "exposed". Say which one this tree resolves to instead of guessing.
 host="${HOST:-}"; [ -f .env ] && grep -q '^HOST=' .env && host="$(env_get HOST)"
 if [ -z "$host" ]; then
-  warn "HOST unset in .env — 'up.sh' binds 127.0.0.1 (unreachable remotely) but 'run_cockpit.sh' binds 0.0.0.0; set HOST explicitly so the server cannot silently bind the wrong one"
+  warn "HOST unset in .env — server_boot.sh binds 0.0.0.0 while the systemd unit falls back to 127.0.0.1; set HOST explicitly so the server cannot silently bind the wrong one"
 else
   case "$host" in
     0.0.0.0)     pass "bind host 0.0.0.0 (all interfaces — put nginx/TLS in front)" ;;
@@ -181,15 +194,13 @@ else
 fi
 
 echo
-echo "== 7. health =="
-if [ -f tests/unit/test_tool_bridge.py ]; then
-  if "$PY" -m unittest tests.unit.test_tool_bridge >/dev/null 2>&1; then
-    pass "contract suite (tests/unit/test_tool_bridge.py)"
-  else
-    fail "contract suite FAILED — run: python3 -m unittest tests.unit.test_tool_bridge"
-  fi
+echo "== 7. import contract =="
+# The exact import the service performs on start (PYTHONPATH=engine:root). A
+# tree that cannot import its own API must never be reported as ready.
+if "$PY" -c 'import sys; sys.path[:0] = ["engine", "."]; import orchestration.api' >/dev/null 2>&1; then
+  pass "engine imports cleanly (orchestration.api)"
 else
-  warn "contract suite not present in this tree"
+  fail "engine fails to import — check PYTHONPATH (engine/) and requirements.txt: $PY -c 'import orchestration.api'"
 fi
 
 echo

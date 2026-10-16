@@ -6,10 +6,12 @@
 # Debian, Oracle Linux, Rocky, macOS). Boots the API & Engine in < 5 seconds.
 #
 # Usage:
-#   bash deploy/server_boot.sh              # Starts in background and healthchecks
-#   bash deploy/server_boot.sh --foreground # Runs uvicorn in foreground
-#   bash deploy/server_boot.sh --stop       # Stops running background processes
-#   bash deploy/server_boot.sh --status     # Checks runtime health and PIDs
+#   bash server_boot.sh              # Starts in background and healthchecks
+#   bash server_boot.sh --foreground # Runs uvicorn in foreground
+#   bash server_boot.sh --stop       # Stops running background processes
+#   bash server_boot.sh --status     # Checks runtime health and PIDs
+#
+# For a permanent install (systemd, venv, secrets) use ops/deploy/install.sh.
 # =============================================================================
 set -e
 
@@ -124,7 +126,11 @@ PORT=8000
 HOST=0.0.0.0
 AGENCY_CAPABILITY_SECRET=$SEC_CAP
 AGENCY_AUDIT_SECRET=$SEC_AUDIT
-API_BEARER_TOKEN=$API_TOKEN
+AGENCY_API_TOKEN=$API_TOKEN
+# A fresh boot has no legacy clients to keep alive: the shared token above is
+# recorded but not accepted until it is switched on deliberately.
+AGENCY_LEGACY_ROOT_TOKEN=off
+AGENCY_OPERATOR=${AGENCY_OPERATOR:-$(id -un)}
 
 CAPSULES_SPOOL=./data/capsules/spool
 CAPSULES_SANDBOX=./data/capsules/sandbox
@@ -218,6 +224,6 @@ echo -e "  ${C_BOLD}Engine API:${C_RESET}     http://localhost:$PORT/"
 echo -e "  ${C_BOLD}API Docs:${C_RESET}       http://localhost:$PORT/docs"
 echo -e "  ${C_BOLD}Health Status:${C_RESET}  http://localhost:$PORT/api/health"
 echo -e "  ${C_BOLD}Log Output:${C_RESET}     $LOG_FILE"
-echo -e "  ${C_BOLD}Control:${C_RESET}        bash deploy/server_boot.sh --status | --stop"
+echo -e "  ${C_BOLD}Control:${C_RESET}        bash server_boot.sh --status | --stop"
 echo -e "${C_GREEN}═══════════════════════════════════════════════════════${C_RESET}"
 echo

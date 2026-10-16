@@ -13,7 +13,11 @@ set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 cd "$ROOT"
-PORT="${PORT:-8090}"
+# PORT comes from .env when present (that is the port the engine binds), so the
+# verifier probes the same socket the server actually opened.
+PORT="${PORT:-}"
+if [ -z "$PORT" ] && [ -f .env ]; then PORT="$(sed -n 's/^PORT=//p' .env | head -1)"; fi
+PORT="${PORT:-8000}"
 
 status() {
   echo "[deploy] verifying http://127.0.0.1:${PORT}"
@@ -52,8 +56,8 @@ pkill -f "uvicorn orchestration.api:app" 2>/dev/null || true
 pkill -f "orchestration/api.py" 2>/dev/null || true
 sleep 1
 
-echo "[deploy] starting run_cockpit.sh"
-nohup bash orchestration/run_cockpit.sh > /tmp/cockpit.log 2>&1 &
+echo "[deploy] starting server_boot.sh"
+nohup bash "$ROOT/server_boot.sh" > /tmp/cockpit.log 2>&1 &
 sleep 3
 
 status

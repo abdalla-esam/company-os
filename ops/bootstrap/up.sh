@@ -2,9 +2,9 @@
 # =============================================================================
 # up.sh — Single command to boot the company engine (Cockpit + Pulse) and stop it
 #
-#   bash bootstrap/up.sh          # up   (default): Server + Periodic Pulse
-#   bash bootstrap/up.sh status   # status of both + latest beat + gear memory
-#   bash bootstrap/up.sh down     # stop both
+#   bash ops/bootstrap/up.sh          # up   (default): Server + Periodic Pulse
+#   bash ops/bootstrap/up.sh status   # status of both + latest beat + gear memory
+#   bash ops/bootstrap/up.sh down     # stop both
 #
 # - Server: uvicorn orchestration.api:app (reads .env via this script)
 # - Pulse : bootstrap/entrypoint.sh loop (standard container loop)
@@ -15,15 +15,16 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 cd "$ROOT" || exit 1
-export PYTHONPATH="$ROOT"
+# engine/ holds the packages; the repo root holds config/ and data/.
+export PYTHONPATH="$ROOT/engine:$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 RUN_DIR="$ROOT/.company_up"
 mkdir -p "$RUN_DIR"
 
 # ---- Environment settings (read from .env and sanitized) --------------------
 if [ -f .env ]; then set -a; . ./.env; set +a; fi
-PORT="${PORT:-8090}"
-[ "$PORT" = "0" ] && PORT=8090
+PORT="${PORT:-8000}"
+[ "$PORT" = "0" ] && PORT=8000
 HOST="${HOST:-127.0.0.1}"
 INTERVAL="${PULSE_INTERVAL:-120}"
 BASE="http://127.0.0.1:$PORT"

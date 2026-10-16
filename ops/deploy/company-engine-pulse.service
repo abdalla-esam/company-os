@@ -6,13 +6,14 @@ Wants=company-engine.service
 [Service]
 Type=simple
 WorkingDirectory=/srv/company-engine
-EnvironmentFile=/srv/company-engine/.env
-Environment=PYTHONPATH=/srv/company-engine
+EnvironmentFile=-/srv/company-engine/.env
+Environment=PYTHONPATH=/srv/company-engine/engine:/srv/company-engine
+Environment=PATH=/srv/company-engine/.venv/bin:/usr/local/bin:/usr/bin:/bin
 
 # entrypoint.sh owns the loop; pulse.py stays one-pass. The loop tolerates a
 # failed beat and keeps going — the factory must not stop because one capsule
 # misbehaved — so Restart= is not the mechanism that keeps it alive here.
-ExecStart=/usr/bin/bash /srv/company-engine/bootstrap/entrypoint.sh
+ExecStart=/usr/local/bin/bash /srv/company-engine/ops/bootstrap/entrypoint.sh
 
 Restart=always
 RestartSec=10

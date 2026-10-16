@@ -1,28 +1,37 @@
 [Unit]
-Description=Sovereign Agency OS - Cockpit REST API + executive dashboard
+Description=Sovereign Agency OS - engine API (cockpit REST + /v1 reads)
 Documentation=file:///srv/company-engine/README.md
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-# The tree the whole company runs from. WorkingDirectory matters: capsule
-# paths, governance.json and the spool are all resolved relative to it.
+# The tree the whole company runs from. WorkingDirectory matters: config/,
+# data/ and the spools are all resolved relative to it.
 WorkingDirectory=/srv/company-engine
 # systemd reads KEY=VALUE lines (no `export`), which is what .env already is.
-EnvironmentFile=/srv/company-engine/.env
-Environment=PYTHONPATH=/srv/company-engine
+# PORT and HOST come from there; the leading `-` means a missing .env is the
+# preflight's job to scream about, not an opaque systemd start failure.
+EnvironmentFile=-/srv/company-engine/.env
+# The engine's import root is engine/ — the repo root holds config/ and data/,
+# not the packages, so `orchestration.api` is only importable with this.
+Environment=PYTHONPATH=/srv/company-engine/engine:/srv/company-engine
+# ...and python3 must resolve to the venv, so the gate below checks the same
+# interpreter the service actually runs.
+Environment=PATH=/srv/company-engine/.venv/bin:/usr/local/bin:/usr/bin:/bin
 
 # THE GATE. The service will not start while preflight reports a FAIL, so a
 # half-configured box can never quietly take traffic. If this refuses to
 # start, read `journalctl -u company-engine -n 50`: preflight prints the
 # exact missing item (capability secret, placeholder token, port, ...).
-ExecStartPre=/usr/local/bin/bash /srv/company-engine/deploy/preflight.sh
-ExecStart=/usr/local/bin/python3 -m uvicorn orchestration.api:app --host 0.0.0.0 --port 8090
+ExecStartPre=/usr/local/bin/bash /srv/company-engine/ops/deploy/preflight.sh
+# --host/--port come from .env (see HOST/PORT there); the default keeps a bare
+# trial reachable from the LAN while a real server sits behind a TLS proxy.
+ExecStart=/usr/local/bin/bash -c 'exec python3 -m uvicorn orchestration.api:app --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}"'
 
 Restart=on-failure
 RestartSec=5
-TimeoutStartSec=60
+TimeoutStartSec=90
 
 User=ubuntu
 Group=ubuntu
