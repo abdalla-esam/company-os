@@ -13,6 +13,6 @@ export PYTHONPATH
 
 echo "[pulse] factory alive — one beat every ${INTERVAL}s"
 while true; do
-  python3 orchestration/pulse.py || echo "[pulse] beat failed — the loop continues"
+  python3 "$ROOT/engine/orchestration/pulse.py" || echo "[pulse] beat failed — the loop continues"
   sleep "$INTERVAL"
 done
