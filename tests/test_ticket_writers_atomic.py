@@ -665,6 +665,32 @@ class DomainTrackerWritesAreAtomic(unittest.TestCase):
         self.assertEqual(on_disk["ticket_id"], result["ticket_id"])
         self.assertEqual(on_disk["via"], "G-FAKE-1")
 
+    def test_auto_ideator_extracts_a_bracketed_topic(self) -> None:
+        """The bracketed-title branch is the one a real beat took.
+
+        Topic extraction has two branches and only the ``[Proposed Title]:``
+        one reaches ``re.sub``; a plain sentence (what the atomic-write test
+        above passes) breaks out at the ``elif`` and never touches it. The
+        server hit the untested branch on its first beat and the ideator died
+        with ``NameError: name 're' is not defined`` — a missing import that
+        no test could see. This drives the branch that ran.
+        """
+        auto_ideator = _load_module(
+            "auto_ideator_topic_under_test",
+            REPO_ROOT / "data" / "domains" / "ideation" / "auto_ideator.py",
+        )
+        workdir = self._workdir()
+        auto_ideator.TICKETS_DIR = str(workdir)
+
+        with mock.patch.object(auto_ideator, "raise_gate", return_value="G-FAKE-2"):
+            result = auto_ideator.save_idea_as_gated_ticket(
+                "[Proposed Title]:    Sovereign ops in the age of agents\n\nBody."
+            )
+
+        self.assertEqual(result["topic"], "Sovereign ops in the age of agents")
+        written = json.loads((workdir / result["ticket_file"]).read_text(encoding="utf-8"))
+        self.assertEqual(written["context"]["topic"], result["topic"])
+
 
 class TicketNWriterRace(unittest.TestCase):
     """API PATCH vs dispatcher rewrite vs tracker settle — no lost update."""
