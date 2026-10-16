@@ -1,0 +1,56 @@
+{
+  "task_type": "social_post",
+  "version": 1,
+  "title": "Marketing social post",
+  "domain": "marketing",
+  "artifacts": {
+    "primary": "copy.md"
+  },
+  "inputs": {
+    "required": ["topic"],
+    "optional": ["angle", "channels", "occasion"]
+  },
+  "gate_template": "marketing",
+  "steps": [
+    {
+      "id": "copy",
+      "worker": "marketing",
+      "state": "draft",
+      "acceptance": "copy.md is non-empty Markdown, and image_prompt.txt is written",
+      "outputs": [
+        { "kind": "text/markdown", "default_path": "copy.md" }
+      ],
+      "on_success": "next",
+      "on_reject": "needs_revision"
+    },
+    {
+      "id": "qa",
+      "worker": "qa",
+      "gate": "qa_review",
+      "state": "pending_qa",
+      "acceptance": "review_copy passes, and image_prompt.txt is strictly English and contextually relevant",
+      "on_success": {
+        "branch_on": "flags.requires_image",
+        "when_true": "design",
+        "when_false": "approval"
+      },
+      "on_reject": "needs_revision"
+    },
+    {
+      "id": "design",
+      "worker": "design",
+      "state": "pending_design",
+      "acceptance": "image.jpg is a decodable image bound to the current visual prompt",
+      "outputs": [
+        { "kind": "image/jpeg", "default_path": "image.jpg" }
+      ],
+      "on_success": "qa",
+      "on_reject": "needs_revision"
+    },
+    {
+      "id": "approval",
+      "gate": "domain_template",
+      "acceptance": "a human decision is recorded at the approval gate"
+    }
+  ]
+}

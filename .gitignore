@@ -1,0 +1,170 @@
+# ==============================================================================
+# Sovereign Agency OS / Company Engine - Git Ignore Rules
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Credentials, Secrets & Environment
+# ------------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.env
+*.key
+*.pem
+*.secret
+vault_backup/
+!/.env.example
+
+# Local user registry + first-boot admin password: real password hashes and
+# secrets must never be committed. Generated at runtime; config/users.json is
+# created on first boot when absent.
+config/users.json
+config/.bootstrap_admin_password
+
+# ------------------------------------------------------------------------------
+# 2. Operating System, IDE & Tool Cache
+# ------------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.freebuff/
+
+# ------------------------------------------------------------------------------
+# 3. Python Artifacts & Virtual Environments
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+ENV/
+
+# ------------------------------------------------------------------------------
+# 4. Synchronization & Background Daemons (Syncthing)
+# ------------------------------------------------------------------------------
+.stfolder
+.stversions
+.syncthing*
+*.sync-conflict-*
+*.tmp
+*.lock
+
+# Hidden writer-lock sidecars (shared_kernel.atomic_io + capsule_engine.locking):
+# one `.<name>.lock` next to every locked file (tickets, manifests, gate
+# entries, ledgers) and one `.lock` inside every capsule directory. Advisory
+# locks held by live writers — never data, never tracked.
+.*.lock
+.lock
+
+# ------------------------------------------------------------------------------
+# 5. Runtime Logs, Telemetry & Heartbeat Data
+# ------------------------------------------------------------------------------
+*.log
+*.log.*
+pulse.log
+pulse_stderr.log
+attention_required.json
+
+# ------------------------------------------------------------------------------
+# 5b. Rebuildable Caches (the files on disk are the truth; these are projections)
+# ------------------------------------------------------------------------------
+# SQLite read cache — rebuilt via POST /api/index/rebuild.
+# The WAL sidecars matter too: SQLite creates them next to the database on
+# every open, so ignoring only the .sqlite3 file leaves two untracked strays
+# behind after any cockpit run.
+.read_index.sqlite3
+.read_index.sqlite3-shm
+.read_index.sqlite3-wal
+# Incremental pulse signature (mtime snapshot inside capsules_spool/)
+.pulse_scan.json
+# up.sh runtime: pids + logs (bootstrap/up.sh)
+.company_up/
+
+# ------------------------------------------------------------------------------
+# 6. Stateful Storage & Dynamic Payloads (data/)
+# ------------------------------------------------------------------------------
+data/capsules/spool/*
+!data/capsules/spool/.gitkeep
+
+data/capsules/sandbox/*
+!data/capsules/sandbox/.gitkeep
+
+data/governance/approval_gates/gate_queue/*
+!data/governance/approval_gates/gate_queue/.gitkeep
+
+data/domains/*/tickets/*
+!data/domains/*/tickets/.gitkeep
+!data/domains/*/tickets/scratch/
+!data/domains/*/tickets/scratch/.gitkeep
+!data/domains/*/tickets/approved/
+!data/domains/*/tickets/approved/.gitkeep
+
+data/domains/*/deliverables/*
+!data/domains/*/deliverables/.gitkeep
+
+data/domains/*/archive/*
+!data/domains/*/archive/.gitkeep
+
+data/assets/vault/*
+!data/assets/vault/.gitkeep
+
+data/index/*
+!data/index/.gitkeep
+
+# Cumulative memory: append-only feedback and dedup ledgers (the files are the
+# truth; the SQLite read cache is rebuilt from them).
+data/memory/*
+!data/memory/.gitkeep
+
+# Durable work queue: pending/claimed/done/failed/cancelled/quarantine items
+# are runtime state (orchestration/work_queue.py); the directory self-heals.
+data/queue/*
+!data/queue/.gitkeep
+
+# Financial spend ledger & audit: append-only usage ledger
+data/finance/*
+!data/finance/.gitkeep
+
+
+# Legacy paths fallback
+capsules/
+capsules_spool/
+capsules_sandbox/
+
+# ------------------------------------------------------------------------------
+# 8. Local Spool Backups & Cleanups
+# ------------------------------------------------------------------------------
+archive/*
+!archive/.gitkeep

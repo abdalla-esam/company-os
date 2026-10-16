@@ -1,0 +1,166 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-11T00:00:00+00:00",
+  "gates": {
+    "enabled": true,
+    "max_gates": 64,
+    "default_template": [
+      {
+        "gate_type": "qa_review",
+        "name": "Automated QA & Syntax Review",
+        "targets": ["deliverables/**/*", "copy.md"]
+      },
+      {
+        "gate_type": "domain_lead_approval",
+        "name": "Domain Lead Sign-off",
+        "authority": "capsule:approve"
+      }
+    ],
+    "domains": {
+      "marketing": [
+        {
+          "gate_type": "qa_review",
+          "name": "Automated QA & Syntax Review",
+          "targets": ["deliverables/**/*", "copy.md"]
+        },
+        {
+          "gate_type": "security_audit",
+          "name": "Security & Vulnerability Audit",
+          "targets": ["deliverables/**/*", "copy.md"]
+        },
+        {
+          "gate_type": "domain_lead_approval",
+          "name": "Domain Lead Sign-off",
+          "authority": "capsule:approve"
+        },
+        {
+          "gate_type": "sovereign_root_approval",
+          "name": "Sovereign Root Sign-off",
+          "required": false,
+          "authority": "capsule:approve"
+        }
+      ],
+      "development": [
+        {
+          "gate_type": "qa_review",
+          "name": "Automated QA & Syntax Review",
+          "targets": ["deliverables/**/*"]
+        },
+        {
+          "gate_type": "security_audit",
+          "name": "Security & Vulnerability Audit",
+          "targets": ["deliverables/**/*"]
+        },
+        {
+          "gate_type": "domain_lead_approval",
+          "name": "Domain Lead Sign-off",
+          "authority": "capsule:approve"
+        }
+      ]
+    },
+    "authorities": {
+      "domain_lead_approval": "capsule:approve",
+      "manual_edit": "capsule:approve",
+      "sovereign_root_approval": "capsule:approve"
+    }
+  },
+  "memory": {
+    "enabled": true,
+    "window_days": 180,
+    "max_constraints": 12,
+    "max_reason_chars": 2000
+  },
+  "dedup": {
+    "enabled": true,
+    "window_days": 30,
+    "similarity_threshold": 0.7,
+    "shingle_size": 2,
+    "max_shingles": 2000,
+    "max_entries": 20000,
+    "domains": {
+      "marketing": {
+        "enabled": true,
+        "window_days": 45
+      },
+      "ideation": {
+        "enabled": true,
+        "window_days": 30
+      },
+      "development": {
+        "enabled": false
+      },
+      "operations": {
+        "enabled": false
+      },
+      "finance": {
+        "enabled": false
+      }
+    }
+  },
+  "trace": {
+    "enabled": true,
+    "max_events": 20000
+  },
+  "design": {
+    "image_provider": "pollinations",
+    "providers": {
+      "pollinations": {
+        "endpoint": "https://image.pollinations.ai/prompt/{encoded}",
+        "model_key": "pollinations-free",
+        "cost_usd": 0.0
+      },
+      "huggingface": {
+        "endpoint": "https://router.huggingface.co/nscale/v1/images/generations",
+        "model": "black-forest-labs/FLUX.1-schnell",
+        "model_key": "black-forest-labs/FLUX.1-schnell",
+        "token_env": "HF_TOKEN",
+        "cost_usd": 0.003
+      }
+    }
+  },
+  "gears": {
+    "_note": "Tool Bridge routing. Per-verb keys (e.g. \"social:publish\") override \"default\". Endpoints are non-secret config; tokens MUST stay out of this file — name the environment variable that holds a secret via token_env (or export AGENCY_BRIDGE_TOKEN). config/engine.json wins over the environment; a null value falls back to the AGENCY_BRIDGE_URL* / AGENCY_BRIDGE_TOKEN* variables.",
+    "default": {
+      "endpoint": null,
+      "token_env": "AGENCY_BRIDGE_TOKEN"
+    },
+    "social:publish": {
+      "endpoint": null,
+      "token_env": "AGENCY_BRIDGE_TOKEN_SOCIAL_PUBLISH"
+    }
+  },
+  "spend": {
+    "enabled": true,
+    "kill": false,
+    "daily_usd": 1.0,
+    "monthly_usd": 15.0,
+    "per_domain_daily_usd": 1.0,
+    "max_calls_per_day": 300,
+  "max_revisions_per_capsule": 3,
+    "default_domain": "core",
+    "known_domains": [
+      "core",
+      "marketing",
+      "ideation",
+      "design",
+      "development",
+      "operations",
+      "finance",
+      "client_management",
+      "brand"
+    ],
+    "unpriced_estimate_usd": 0.02,
+    "estimate_tokens": {"prompt": 2500, "completion": 1000},
+    "model_prices": {
+      "gpt-4o-mini": {"prompt_per_1k": 0.00015, "completion_per_1k": 0.0006},
+      "gpt-4o": {"prompt_per_1k": 0.0025, "completion_per_1k": 0.01},
+      "qwen/qwen3.8-27b": {"prompt_per_1k": 0.00015, "completion_per_1k": 0.0006}
+    },
+    "image_costs": {
+      "black-forest-labs/FLUX.1-schnell": 0.003,
+      "pollinations-free": 0.0,
+      "directus-api": 0.0
+    },
+    "subscriptions": []
+  }
+}

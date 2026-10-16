@@ -1,0 +1,59 @@
+{
+  "company_name": "",
+  "legal_name": "",
+  "brand_name": "",
+  "tagline": "",
+  "description": "",
+  "industry": "",
+  "commercial_registration": "",
+  "tax_id": "",
+  "email": "",
+  "support_email": "",
+  "phone": "",
+  "whatsapp": "",
+  "website": "",
+  "address": {
+    "country": "",
+    "city": "",
+    "state_province": "",
+    "postal_code": "",
+    "street": ""
+  },
+  "timezone": "",
+  "currency": "",
+  "logo_url": "",
+  "logo_dark_url": "",
+  "logo_light_url": "",
+  "logo_icon_url": "",
+  "logo_path": "",
+  "brand_colors": {
+    "primary": "",
+    "secondary": "",
+    "accent": "",
+    "background": "",
+    "text": ""
+  },
+  "typography": {
+    "heading_font": "",
+    "body_font": "",
+    "primary_font": ""
+  },
+  "tone": "",
+  "language": "",
+  "target_audience": "",
+  "mission": "",
+  "vision": "",
+  "values": [],
+  "primary_channels": [],
+  "social_links": {
+    "linkedin": "",
+    "x": "",
+    "facebook": "",
+    "instagram": "",
+    "youtube": "",
+    "tiktok": "",
+    "github": ""
+  },
+  "default_ttl_hours": 48,
+  "custom_metadata": {}
+}

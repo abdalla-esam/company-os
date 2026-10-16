@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sovereign-agency-os.local/schemas/tool_bridge.request.schema.json",
+  "title": "Tool Bridge Request v1",
+  "description": "The normative envelope the Sovereign Agency OS sends to ANY swappable AI tool (n8n, Dify, Langflow, LangGraph, vLLM, a hand-written service). Closed verbs are the GEARS (resource:action); the tool behind a gear is free-form and named only in the response's engine.tool, so a gear can be re-implemented for a different task without touching the kernel.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bridge_version",
+    "gear",
+    "request_id",
+    "issued_at",
+    "deadline_ms",
+    "input_sha256",
+    "capsule",
+    "governance",
+    "input"
+  ],
+  "properties": {
+    "bridge_version": {
+      "const": 1,
+      "description": "Contract version. A gear that does not know this value must answer status=refused, code=unsupported_version — never guess."
+    },
+    "gear": { "$ref": "#/$defs/gear_name" },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "description": "Correlation id; the response MUST echo it verbatim. A mismatch is a protocol violation (fail closed)."
+    },
+    "issued_at": {
+      "type": "string",
+      "minLength": 20,
+      "description": "ISO-8601 UTC timestamp of issuance (aware, +00:00)."
+    },
+    "deadline_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 600000,
+      "description": "Hard deadline for the gear to answer, in milliseconds. Exceeding it means the caller abandons the answer (fail closed)."
+    },
+    "input_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical (sorted-key, compact, UTF-8) JSON of `input`. A gear may re-hash and refuse code=integrity if it does not match."
+    },
+    "capsule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "state"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "state": { "$ref": "#/$defs/capsule_state" },
+        "attempt": { "type": "integer", "minimum": 0, "maximum": 1000 },
+        "domain": { "type": "string", "minLength": 1, "maxLength": 64 }
+      },
+      "description": "Which capsule this answer belongs to, and where it sits in the state machine. Context only — the gear may not move capsule state."
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain", "autonomy_level"],
+      "properties": {
+        "domain": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "autonomy_level": { "$ref": "#/$defs/autonomy_level" },
+        "decided_by": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Operator provenance as recorded by the kernel (subject + capability key id). Never a credential."
+        }
+      },
+      "description": "The governance context the gear is asked to respect (branch + earned autonomy level)."
+    },
+    "input": {
+      "type": "object",
+      "description": "Gear-specific payload; its keys are closed per gear (see $defs.gear_inputs).",
+      "maxProperties": 32,
+      "$comment": "Size is bounded in BYTES of UTF-8, not in characters: this object plus the ids, digests, capsule and governance must stay within 512 KiB, with a 4 KiB margin reserved for everything that is not `input`. The per-field maxLength values under $defs.gear_inputs are characters and do NOT bound the total — log:summarize is the gear where 500 x 4000 satisfies both per-field limits and is still refused once its UTF-8 size passes the budget. Implement the byte budget on `input`; the kernel refuses an oversized input naming the gear, the byte count and the budget."
+    }
+  },
+  "$defs": {
+    "gear_name": {
+      "type": "string",
+      "enum": [
+        "text:draft",
+        "text:review",
+        "image:distill",
+        "image:read",
+        "data:extract",
+        "data:classify",
+        "log:summarize",
+        "social:publish",
+        "message:send",
+        "message:interpret",
+        "lead:qualify",
+        "code:propose",
+        "finance:invoice",
+        "people:screen",
+        "support:triage",
+        "docs:review"
+      ]
+    },
+    "capsule_state": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "in_progress",
+        "in_review",
+        "pending_qa",
+        "pending_design",
+        "pending_approval",
+        "stalled",
+        "needs_revision",
+        "approved",
+        "published",
+        "failed",
+        "archived"
+      ]
+    },
+    "autonomy_level": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
+    "short_text": { "type": "string", "minLength": 1, "maxLength": 60000 },
+    "token": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "http_url": { "type": "string", "maxLength": 2048, "pattern": "^https?://" },
+    "string_list": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 24,
+      "items": { "type": "string", "minLength": 1, "maxLength": 300 },
+      "uniqueItems": true
+    },
+    "media_bytes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mime", "base64", "sha256"],
+      "properties": {
+        "mime": { "type": "string", "pattern": "^[a-z]+/[a-z0-9.+-]{1,64}$" },
+        "base64": { "type": "string", "minLength": 4, "maxLength": 5600000 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      },
+      "description": "In-flight media: standard base64 of the bytes plus the SHA-256 of those exact bytes. The kernel refuses a payload whose digest does not describe its bytes, and caps decoded media at 4 MiB."
+    },
+    "line_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "amount"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "amount": { "type": "number", "minimum": 0 }
+      }
+    },
+    "gear_inputs": {
+      "text:draft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["brief"],
+        "properties": {
+          "brief": { "$ref": "#/$defs/short_text" },
+          "topic": { "type": "string", "maxLength": 300 },
+          "platform": { "type": "string", "maxLength": 64 },
+          "language": { "type": "string", "maxLength": 32 }
+        }
+      },
+      "text:review": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": { "text": { "$ref": "#/$defs/short_text" } }
+      },
+      "image:distill": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "context": { "type": "string", "maxLength": 1000 }
+        }
+      },
+      "image:read": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["media"],
+        "properties": {
+          "media": { "$ref": "#/$defs/media_bytes" },
+          "language": { "type": "string", "maxLength": 32 }
+        },
+        "description": "OCR / vision read of a page (scanned contract, receipt, form). The page travels as digest-verified bytes: the kernel hands over the artifact it holds, never a URL for the gear to fetch."
+      },
+      "data:extract": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "fields"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "fields": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 24,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "uniqueItems": true
+          }
+        }
+      },
+      "data:classify": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "labels"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "labels": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 32,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "uniqueItems": true
+          }
+        }
+      },
+      "log:summarize": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["entries"],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": { "type": "string", "minLength": 1, "maxLength": 4000 }
+          }
+        }
+      },
+      "social:publish": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "text"],
+        "properties": {
+          "channel": { "$ref": "#/$defs/token" },
+          "text": { "$ref": "#/$defs/short_text" },
+          "media_urls": { "type": "array", "maxItems": 10, "items": { "$ref": "#/$defs/http_url" } },
+          "media": { "$ref": "#/$defs/media_bytes" },
+          "scheduled_for": { "type": "string", "maxLength": 40 }
+        },
+        "description": "Send either media (bytes, digest-verified by the kernel) or media_urls (already hosted links) — never both."
+      },
+      "message:send": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "to", "text"],
+        "properties": {
+          "channel": { "$ref": "#/$defs/token" },
+          "to": { "$ref": "#/$defs/token" },
+          "text": { "$ref": "#/$defs/short_text" }
+        }
+      },
+      "message:interpret": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "text"],
+        "properties": {
+          "channel": { "$ref": "#/$defs/token" },
+          "text": { "$ref": "#/$defs/short_text" }
+        }
+      },
+      "lead:qualify": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "criteria"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "criteria": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "uniqueItems": true
+          }
+        }
+      },
+      "code:propose": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["request"],
+        "properties": {
+          "request": { "$ref": "#/$defs/short_text" },
+          "constraints": { "$ref": "#/$defs/string_list" }
+        }
+      },
+      "finance:invoice": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["customer", "line_items", "currency"],
+        "properties": {
+          "customer": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "line_items": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/line_item" } },
+          "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+          "due_date": { "type": "string", "maxLength": 40 }
+        }
+      },
+      "people:screen": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "requirements"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "requirements": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 24,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "uniqueItems": true
+          }
+        }
+      },
+      "support:triage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text"],
+        "properties": { "text": { "$ref": "#/$defs/short_text" } }
+      },
+      "docs:review": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "checklist"],
+        "properties": {
+          "text": { "$ref": "#/$defs/short_text" },
+          "checklist": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 24,
+            "items": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "gear": { "const": "text:draft" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/text:draft" } } } },
+    { "if": { "properties": { "gear": { "const": "text:review" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/text:review" } } } },
+    { "if": { "properties": { "gear": { "const": "image:distill" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/image:distill" } } } },
+    { "if": { "properties": { "gear": { "const": "image:read" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/image:read" } } } },
+    { "if": { "properties": { "gear": { "const": "data:extract" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/data:extract" } } } },
+    { "if": { "properties": { "gear": { "const": "data:classify" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/data:classify" } } } },
+    { "if": { "properties": { "gear": { "const": "log:summarize" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/log:summarize" } } } },
+    { "if": { "properties": { "gear": { "const": "social:publish" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/social:publish" } } } },
+    { "if": { "properties": { "gear": { "const": "message:send" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/message:send" } } } },
+    { "if": { "properties": { "gear": { "const": "message:interpret" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/message:interpret" } } } },
+    { "if": { "properties": { "gear": { "const": "lead:qualify" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/lead:qualify" } } } },
+    { "if": { "properties": { "gear": { "const": "code:propose" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/code:propose" } } } },
+    { "if": { "properties": { "gear": { "const": "finance:invoice" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/finance:invoice" } } } },
+    { "if": { "properties": { "gear": { "const": "people:screen" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/people:screen" } } } },
+    { "if": { "properties": { "gear": { "const": "support:triage" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/support:triage" } } } },
+    { "if": { "properties": { "gear": { "const": "docs:review" } } }, "then": { "properties": { "input": { "$ref": "#/$defs/gear_inputs/docs:review" } } } }
+  ]
+}

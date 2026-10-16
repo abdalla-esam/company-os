@@ -1,0 +1,39 @@
+[Unit]
+Description=Sovereign Agency OS - Cockpit REST API + executive dashboard
+Documentation=file:///srv/company-engine/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# The tree the whole company runs from. WorkingDirectory matters: capsule
+# paths, governance.json and the spool are all resolved relative to it.
+WorkingDirectory=/srv/company-engine
+# systemd reads KEY=VALUE lines (no `export`), which is what .env already is.
+EnvironmentFile=/srv/company-engine/.env
+Environment=PYTHONPATH=/srv/company-engine
+
+# THE GATE. The service will not start while preflight reports a FAIL, so a
+# half-configured box can never quietly take traffic. If this refuses to
+# start, read `journalctl -u company-engine -n 50`: preflight prints the
+# exact missing item (capability secret, placeholder token, port, ...).
+ExecStartPre=/usr/local/bin/bash /srv/company-engine/deploy/preflight.sh
+ExecStart=/usr/local/bin/python3 -m uvicorn orchestration.api:app --host 0.0.0.0 --port 8090
+
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+
+User=ubuntu
+Group=ubuntu
+
+# --- hardening: the engine only ever writes inside its own tree -------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/srv/company-engine
+ProtectHome=false
+
+
+[Install]
+WantedBy=multi-user.target

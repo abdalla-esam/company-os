@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sovereign-agency-os.local/schemas/tool_bridge.response.schema.json",
+  "title": "Tool Bridge Response v1",
+  "description": "The normative answer envelope ANY swappable AI tool must return. Strict JSON only: no prose, no markdown fences, no extra keys. status=refused is a first-class, lawful answer (code required) and is treated by the kernel as a refusal, never as an empty success.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bridge_version", "gear", "request_id", "status", "output"],
+  "properties": {
+    "bridge_version": { "const": 1 },
+    "gear": { "$ref": "https://sovereign-agency-os.local/schemas/tool_bridge.request.schema.json#/$defs/gear_name" },
+    "request_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "description": "Echo of the request's request_id. A mismatch is a protocol violation."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "refused", "error"],
+      "description": "ok = a contract-valid output; refused = the gear lawfully declined (policy, unsupported version, missing capability); error = the tool failed while answering."
+    },
+    "output": {
+      "type": "object",
+      "description": "Gear-specific result. Empty ({}) unless status=ok.",
+      "maxProperties": 32
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt_tokens": { "type": "integer", "minimum": 0 },
+        "completion_tokens": { "type": "integer", "minimum": 0 },
+        "total_tokens": { "type": "integer", "minimum": 0 }
+      },
+      "description": "Provider counters, folded into manifest metadata.usage by the caller. Unknown extra keys are ignored as provider noise; a malformed known counter is a violation."
+    },
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool"],
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Free-form: which implementation answered (n8n, dify, langflow, langgraph, vllm, evolution-api, reference-gear, ...). Deliberately NOT an enum — swapping the tool must never require a contract change."
+        },
+        "model": { "type": "string", "maxLength": 200 },
+        "version": { "type": "string", "maxLength": 64 },
+        "latency_ms": { "type": "integer", "minimum": 0, "maximum": 3600000 }
+      },
+      "description": "Required when status=ok: the provenance of the answer."
+    },
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,48}$",
+          "description": "Machine-readable refusal reason (unsupported_version, policy, missing_capability, integrity, too_large, unknown_gear, ...)."
+        },
+        "detail": { "type": "string", "maxLength": 2000 }
+      },
+      "description": "Required when status=refused."
+    },
+    "output_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Optional digest of the canonical (sorted-key, compact, UTF-8) JSON of `output`. When present it MUST match what the caller computes; a mismatch is refused (the audit chain binds the answer's exact bytes)."
+    }
+  },
+  "$defs": {
+    "severity_finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "detail"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "checklist_flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "note"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["info", "warning", "critical"] },
+        "note": { "type": "string", "minLength": 1, "maxLength": 2000 }
+      }
+    },
+    "proposed_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 300, "pattern": "^(?!/)(?!.*\\.\\.)[^~].*$" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "text_draft_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 60000 } }
+    },
+    "text_review_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "feedback"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "feedback": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "image_distill_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt"],
+      "properties": { "prompt": { "type": "string", "minLength": 1, "maxLength": 1000 } }
+    },
+    "image_read_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "confidence"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1, "maxLength": 60000 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "blocks": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "text"],
+            "properties": {
+              "kind": { "type": "string", "enum": ["header", "paragraph", "table", "figure"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 4000 }
+            }
+          }
+        }
+      },
+      "description": "Text read from the page, an honest confidence, and optional structural blocks. A reader that cannot see the page must refuse (code=unsupported_mime), never invent a transcription."
+    },
+    "data_extract_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "maxProperties": 24,
+          "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+        }
+      }
+    },
+    "data_classify_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "confidence"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "log_summarize_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "findings"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "findings": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/severity_finding" } }
+      }
+    },
+    "social_publish_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_id", "channel"],
+      "properties": {
+        "receipt_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "channel": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "published_at": { "type": "string", "maxLength": 40 }
+      }
+    },
+    "message_send_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message_id", "channel"],
+      "properties": {
+        "message_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "channel": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "message_interpret_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intent", "reply_text", "escalate"],
+      "properties": {
+        "intent": { "type": "string", "pattern": "^[a-z][a-z0-9_:]{1,48}$" },
+        "reply_text": { "type": "string", "minLength": 1, "maxLength": 60000 },
+        "escalate": { "type": "boolean" }
+      }
+    },
+    "lead_qualify_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "qualified", "reasons"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "qualified": { "type": "boolean" },
+        "reasons": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 }
+        }
+      }
+    },
+    "code_propose_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "files"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "files": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/proposed_file" } }
+      }
+    },
+    "finance_invoice_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["invoice_id", "total", "currency"],
+      "properties": {
+        "invoice_id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "total": { "type": "number", "minimum": 0, "maximum": 1000000000 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "people_screen_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "gaps", "summary"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "gaps": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 }
+        },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 8000 }
+      }
+    },
+    "support_triage_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["severity", "category", "escalate"],
+      "properties": {
+        "severity": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+        "category": { "type": "string", "pattern": "^[a-z][a-z0-9_:]{1,48}$" },
+        "escalate": { "type": "boolean" },
+        "reply_text": { "type": "string", "minLength": 1, "maxLength": 60000 }
+      }
+    },
+    "docs_review_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["summary", "flags"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "flags": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/checklist_flag" } }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "ok" } }, "required": ["status"] },
+      "then": {
+        "required": ["engine"],
+        "allOf": [
+          { "if": { "properties": { "gear": { "const": "text:draft" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/text_draft_output" } } } },
+          { "if": { "properties": { "gear": { "const": "text:review" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/text_review_output" } } } },
+          { "if": { "properties": { "gear": { "const": "image:distill" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/image_distill_output" } } } },
+          { "if": { "properties": { "gear": { "const": "image:read" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/image_read_output" } } } },
+          { "if": { "properties": { "gear": { "const": "data:extract" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/data_extract_output" } } } },
+          { "if": { "properties": { "gear": { "const": "data:classify" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/data_classify_output" } } } },
+          { "if": { "properties": { "gear": { "const": "log:summarize" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/log_summarize_output" } } } },
+          { "if": { "properties": { "gear": { "const": "social:publish" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/social_publish_output" } } } },
+          { "if": { "properties": { "gear": { "const": "message:send" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/message_send_output" } } } },
+          { "if": { "properties": { "gear": { "const": "message:interpret" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/message_interpret_output" } } } },
+          { "if": { "properties": { "gear": { "const": "lead:qualify" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/lead_qualify_output" } } } },
+          { "if": { "properties": { "gear": { "const": "code:propose" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/code_propose_output" } } } },
+          { "if": { "properties": { "gear": { "const": "finance:invoice" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/finance_invoice_output" } } } },
+          { "if": { "properties": { "gear": { "const": "people:screen" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/people_screen_output" } } } },
+          { "if": { "properties": { "gear": { "const": "support:triage" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/support_triage_output" } } } },
+          { "if": { "properties": { "gear": { "const": "docs:review" } } }, "then": { "properties": { "output": { "$ref": "#/$defs/docs_review_output" } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "status": { "enum": ["refused", "error"] } }, "required": ["status"] },
+      "then": { "properties": { "output": { "maxProperties": 0 } } }
+    },
+    {
+      "if": { "properties": { "status": { "const": "refused" } }, "required": ["status"] },
+      "then": { "required": ["refusal"] }
+    }
+  ]
+}

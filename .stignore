@@ -1,0 +1,33 @@
+// ==============================================================================
+// Syncthing Ignore Rules (.stignore)
+// Prevents syncing local caches, logs, conflict files, and git metadata
+// ==============================================================================
+
+(?d).DS_Store
+(?d)__pycache__
+(?d)*.py[cod]
+(?d)*.sync-conflict-*
+(?d).syncthing*
+(?d)*.tmp
+(?d).company_up
+
+*.log
+pulse.log
+pulse_stderr.log
+agency_os_pulse.log
+
+// Rebuildable caches — ممنوعة المزامنة (تُعاد بناؤتها محلياً)، بدون (?d) فلا تُحذف
+.read_index.sqlite3
+.pulse_scan.json
+data/capsules/sandbox
+data/index
+capsules/sandbox
+capsules_sandbox
+
+
+.freebuff
+.vscode
+.idea
+.pytest_cache
+.venv
+venv

@@ -1,0 +1,12 @@
+# The factory container: stock Python, the synced vault as the only truth.
+# Run from the repo root: docker compose -f bootstrap/compose.yml up -d
+services:
+  pulse:
+    image: python:3.11-slim
+    working_dir: /vault
+    volumes:
+      - ..:/vault                # the synced vault IS the system (code + data)
+    command: sh bootstrap/entrypoint.sh
+    environment:
+      - PULSE_INTERVAL=${PULSE_INTERVAL:-120}
+    restart: unless-stopped

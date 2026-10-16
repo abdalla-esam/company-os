@@ -1,0 +1,18 @@
+{
+  "cadence_hours": 48.0,
+  "enabled_channels": [
+    "linkedin",
+    "facebook",
+    "x"
+  ],
+  "occasions_mode": "auto",
+  "schedule_mode": "strict",
+  "budget_guard": {
+    "max_attempts": 3,
+    "max_image_budget_usd": 0.01,
+    "hf_model": "black-forest-labs/FLUX.1-schnell",
+    "allow_free_fallback": true
+  },
+  "feedback_memory_enabled": true,
+  "zero_waste_vault_enabled": true
+}
