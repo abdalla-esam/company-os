@@ -206,6 +206,70 @@ def get_company_field(field_path: str, default: Any = "") -> Any:
     return curr if curr is not None else default
 
 
+#: ``(label, field)`` pairs, in the order a reader should meet them in a
+#: prompt: who we are, what we do, how we sound, who we serve.
+PROMPT_CONTEXT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("Industry", "industry"),
+    ("Tagline", "tagline"),
+    ("What we do", "description"),
+    ("Tone", "tone"),
+    ("Language", "language"),
+    ("Target reader", "target_audience"),
+    ("Mission", "mission"),
+    ("Values", "values"),
+    ("Channels", "primary_channels"),
+)
+
+
+def _render_prompt_value(value: Any) -> str:
+    """One profile value as a single prompt line: lists join, blanks vanish."""
+    if isinstance(value, (list, tuple)):
+        return "، ".join(str(item).strip() for item in value if str(item).strip())
+    return str(value or "").strip()
+
+
+def company_prompt_context(profile: Optional[Mapping[str, Any]] = None) -> str:
+    """Render the company profile as a compact block a prompt can carry.
+
+    The block is *descriptive*: it says who the company is. What to do with
+    that — which language to write in, how many versions to produce — stays
+    with the caller, because the ideation brief and the finished post want
+    different instructions over the same DNA.
+
+    Returns ``""`` when the profile names no company, so a caller may append
+    the block unconditionally; an unfilled profile adds no empty headings for
+    the model to interpret. Every other field is included only when non-empty,
+    for the same reason.
+    """
+    p = profile if profile is not None else load_company_profile()
+    brand = str(p.get("brand_name") or p.get("company_name") or "").strip()
+    if not brand:
+        return ""
+
+    lines = [f"Company DNA — write as {brand}, not about it.", f"- Brand: {brand}"]
+    for label, field in PROMPT_CONTEXT_FIELDS:
+        rendered = _render_prompt_value(p.get(field))
+        if rendered:
+            lines.append(f"- {label}: {rendered}")
+
+    website = _render_prompt_value(p.get("website"))
+    if website:
+        lines.append(f"- Website: {website}")
+
+    # The service list is the one place a deployment names what it sells, and
+    # it has no first-class field, so it lives in the documented extension
+    # point. It is documented as a list: anything else is not a service list
+    # and is not advertised (a scalar here once rendered as "- Services: 7").
+    custom = p.get("custom_metadata")
+    services = custom.get("services") if isinstance(custom, Mapping) else None
+    if isinstance(services, (list, tuple)):
+        rendered_services = _render_prompt_value(services)
+        if rendered_services:
+            lines.append(f"- Services: {rendered_services}")
+
+    return "\n".join(lines)
+
+
 def enrich_with_company_context(
     target: MutableMapping[str, Any], profile: Optional[Mapping[str, Any]] = None
 ) -> dict[str, Any]:

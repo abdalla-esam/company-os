@@ -23,7 +23,7 @@ import sys
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(HERE, "..", ".."))
@@ -84,6 +84,15 @@ except ImportError:
     Ticket = None
     Decision = None
 
+# The company profile is what keeps the ideator talking about the customer's
+# business instead of about the engine. Loaded through the shared kernel, which
+# resolves the same path the API and every worker use.
+try:
+    from shared_kernel.brand_profile import company_prompt_context, load_company_profile
+except ImportError:  # pragma: no cover - stripped environments
+    company_prompt_context = None  # type: ignore[assignment]
+    load_company_profile = None  # type: ignore[assignment]
+
 try:
     from capsule_engine.gateway import default_gateway, ModelGateway, OfflineModelGateway
 except ImportError:
@@ -94,62 +103,65 @@ except ImportError:
 logger = logging.getLogger("ideation.auto_ideator")
 DEFAULT_CADENCE_HOURS = 48.0
 
-# Curated reservoir of high-authority strategic themes for deterministic fallback
+# Curated reservoir of simple, business-owner-facing themes for the
+# deterministic fallback. Every one is a practical tip a reader can act on,
+# paired with one of the company's own services — no architecture, no
+# cryptography, nothing a non-technical owner would have to look up.
 CORE_STRATEGIC_PILLARS = [
     {
-        "title": "Closed-Loop Architectures & Software Sovereignty: Why Rented SaaS Fails Enterprise Asset Protection",
-        "angle": "Architectural comparison between SaaS vendor lock-in that leaks proprietary data versus 100% owned sovereign engines.",
+        "title": "موقعك بيخسّرك عملاء وإنت مش واخد بالك: 5 أسباب",
+        "angle": "أسباب عملية وبسيطة بتخلي الزائر يسيب الموقع بسرعة — البطء، الصفحة مش واضحة على الموبايل، ومفيش طريقة سهلة للتواصل.",
         "platform": "linkedin",
         "takeaways": [
-            "Companies do not own their software as long as their operational data resides in third-party databases.",
-            "The concept of Self-Contained Vaults and zero-intermediary atomic operations.",
-            "Building defensible competitive advantages that competitors cannot replicate with a subscription.",
+            "أغلب الزوار بيفتحوا من الموبايل — لو الموقع مش مريح على الموبايل، هيسيبوه في ثواني.",
+            "الصفحة اللي بتاخد وقت طويل في الفتح بتخسّر الزائر قبل ما يشوف العرض أصلاً.",
+            "أسهل تحسين: خلي طريقة التواصل واضحة في كل صفحة، وزائر واحد بس مش لازم يلف عشان يوصلك.",
         ],
-        "cta": "Is your tech stack a strategic asset you own, or a rented SaaS subscription that vanishes when you stop paying?",
+        "cta": "افتح موقعك من موبايلك دلوقتي وقيس كام ثانية لحد ما يفتح — لو أكتر من ٣ ثواني، تعال نصلّحها.",
     },
     {
-        "title": "Atomic Lock Engineering: How Autonomous Systems Prevent Collisions Without Central Orchestration Servers",
-        "angle": "Explaining how flock algorithms and atomic file replacement (os.replace) enable decentralized self-coordinating agents.",
+        "title": "شغل بتعمله بإيدك كل يوم؟ دي أول علامة إنك محتاج نظام",
+        "angle": "إزاي تعرف إن مهمة متكررة بقت تستحق برنامج بسيط بدل شغل يدوي — بحساب بسيط للوقت المهدور.",
         "platform": "facebook",
         "takeaways": [
-            "Race conditions are the primary vulnerability in naive corporate automation workflows.",
-            "Leveraging operating system file locks to provide deterministic, zero-cost, 100% reliable concurrency.",
-            "Architectural simplicity consistently outperforms complex server clusters.",
+            "احسبها ببساطة: لو المهمة بتاخد ١٠ دقايق وبتحصل ٥ مرات يومياً، ده يوم عمل كامل كل أسبوع.",
+            "النظام البسيط بيشتغل أحسن من النظام المعقّد اللي محدش بيفتحه.",
+            "أول خطوة مش شراء برنامج كبير — اكتب الخطوات على ورق وشوف فين التكرار.",
         ],
-        "cta": "Transform your organization into a pulse-driven factory without the burden of centralized server maintenance.",
+        "cta": "قول لنا المهمة اللي بتاخد منك أكبر وقت في اليوم، ونشوف لو ينفع تتحوّل لنظام بسيط.",
     },
     {
-        "title": "Cryptographic Anti-TOCTOU Binding: How Executives Guarantee Output Integrity Between Review and Publishing",
-        "angle": "Documenting cryptographic enforcement via immutable SHA-256 hashes bound to human review gates.",
+        "title": "إكسيل مش نظام: إمتى تحتاج برنامج حقيقي لشغلك",
+        "angle": "الفرق العملي بين شيت إكسيل وبرنامج مخصص — من ناحية الأخطاء، الصلاحيات، والنسخ اللي بتضيع.",
         "platform": "linkedin",
         "takeaways": [
-            "Time-of-Check to Time-of-Use: the risk of AI deliverable tampering after managerial approval.",
-            "Binding human decisions directly to cryptographic content hashes to reject altered bytes.",
-            "Strict technical governance eliminating silent hallucination drift and prompt injection risks.",
+            "إكسيل ممتاز للبداية، بس بيتحول لمشكلة لما أكتر من شخص يعدّل نفس الملف.",
+            "أخطر حاجة في الشيت: نسخة قديمة بتفضل مفتوحة ومحدش يعرف مين الصح.",
+            "العلامة الواضحة للانتقال: لما تحتاج تسجّل مين عدّل إيه وامتى.",
         ],
-        "cta": "Never deploy autonomous AI agents in your enterprise without fail-closed cryptographic governance gates.",
+        "cta": "لو بتدير شغلك في ملف إكسيل بيعدّل عليه أكتر من شخص، ابعتلنا وهنقولك لو محتاج نظام فعلاً.",
     },
     {
-        "title": "Progressive Autonomy Ladder (L0 to L3): The Engineering Methodology for Agent Self-Publishing",
-        "angle": "How companies systematically scale from 100% human review to full autonomy while preserving instant safety demotions.",
+        "title": "فاتورتك بتتأخر؟ الأتمتة بتحل ده من غير ما تزعّل عميل",
+        "angle": "إزاي تذكير تلقائي بسيط للفاتورة المستحقة بيقصّر مدة التحصيل بدون مكالمات محرجة.",
         "platform": "facebook",
         "takeaways": [
-            "Autonomous does not mean unaccountable: continuous 2% random audits on high-autonomy agents.",
-            "Instant Demotion: any human rejection immediately resets the domain to L0 under fail-closed principles.",
-            "Building trust in AI agents mirrors human talent development: gradual, verifiable, and evidence-based.",
+            "التأخير في التحصيل غالباً سببه النسيان مش رفض الدفع.",
+            "تذكير واحد تلقائي قبل الميعاد بيوفّر مجهود المتابعة اليدوي كل شهر.",
+            "خلي الدفع سهل: كل ما زادت خطوات الدفع، قلّ اللي بيكمّل.",
         ],
-        "cta": "Design your agency governance with architectural rigor: trust is earned incrementally and revoked instantly upon error.",
+        "cta": "لو بتحصّل فواتيرك بالمتابعة اليدوية، تعال نشوف طريقة بسيطة توفّر عليك المكالمات.",
     },
     {
-        "title": "Fail-Closed Architecture: Why Halting on Ambiguity is the Highest Form of Machine Intelligence",
-        "angle": "The engineering philosophy of AI systems that prefer safe halting and human escalation over guessing under uncertainty.",
+        "title": "تطوير نظامك القديم أرخص من بناء واحد جديد — إمتى؟",
+        "angle": "امتى التطوير التدريجي للنظام الموجود أوفر وأأمن من إعادة البناء من الصفر.",
         "platform": "linkedin",
         "takeaways": [
-            "Brittle systems assume success and crash on exceptions; sovereign systems are architected to fail closed.",
-            "Confidence Thresholds: when an agent escalates for executive authorization.",
-            "Long-term automation sustainability depends on zero unauthorized actions on sensitive production lines.",
+            "إعادة البناء من الصفر بتوقف الشغل لفترة — والتطوير التدريجي مش بيوقف حاجة.",
+            "لو النظام شغّال والبيانات سليمة، غالباً محتاج تحسينات مش استبدال.",
+            "ابدأ بأكبر نقطة بتعطّل الفريق، مش بأصغر حاجة شكلها سهل.",
         ],
-        "cta": "Are your intelligent systems designed to recognize their boundaries, or do they gamble with your enterprise reputation?",
+        "cta": "عندك نظام قديم بيعطّل شغلك؟ ابعتلنا وهنقولك بصراحة: يتطوّر ولا يستحق إعادة بناء.",
     },
 ]
 
@@ -206,23 +218,27 @@ def check_cadence(threshold_hours: float = DEFAULT_CADENCE_HOURS) -> Tuple[bool,
 # 2. Autonomous Idea Generation via ModelGateway with Deterministic Fallback
 # ==============================================================================
 
-IDEATOR_SYSTEM_PROMPT = """You are the Chief Strategy & Content Officer for an elite tech agency powered by a Sovereign Agency OS.
+IDEATOR_SYSTEM_PROMPT_TEMPLATE = """You are the content strategist for {company_line}.
 
-Your mission:
-Generate exactly ONE high-impact, authoritative thought-leadership post proposal.
-Support multilingual content seamlessly: output in Arabic if generating for Arabic leadership audiences, or English/other language if requested, maintaining executive depth and authoritative prestige.
+Your job is to propose exactly ONE post idea that a normal business owner would
+read, understand, and find useful. Simple, practical, concrete.
 
-Strategic Themes:
-- Technological sovereignty, closed-loop architectures, and autonomous self-governing systems.
-- The fundamental difference between superficial scripting and robust fail-closed state machines.
-- Code reliability, atomic locks, and anti-TOCTOU cryptographic integrity.
-- Corporate independence from rented cloud lock-ins using sovereign local vaults.
+What the post must do, in this order:
+1. Give one practical tip the reader can use today about running their business
+   with better software, a better website, or less manual work.
+2. Link that tip to one of the company's own services — an honest mention, never
+   a hard sell.
 
-Strict Prohibitions:
+Strict prohibitions:
+- No enterprise-architecture jargon: no TOCTOU, no cryptography, no "autonomy
+  ladders", no "sovereign", no "closed-loop", no "fail-closed". If a
+  non-technical business owner would have to look a word up, do not use it.
+- Do NOT write about the platform, the engine, or the tooling that runs this
+  company. Write about the reader's business.
 - Strictly avoid generic AI buzzwords, cliches, and fluff.
-- Do NOT write the entire final post. Output only the structured strategic brief and core takeaways.
+- Do NOT write the entire final post. Output only the structured brief below.
 - Strictly avoid duplicating any topic listed in the historical memory context.
-
+{company_block}
 Required Output Format:
 [Proposed Title]: ...
 [Strategic Angle]: ...
@@ -234,6 +250,46 @@ Required Output Format:
 - ...
 [Leadership CTA]: ...
 """
+
+#: Used when the deployment has no company profile: enough to keep the ideator
+#: talking about a software business instead of about itself.
+IDEATOR_FALLBACK_COMPANY = (
+    "a software company that builds programs, websites and digital solutions "
+    "for businesses"
+)
+
+
+def build_ideator_system_prompt() -> str:
+    """The ideator's instructions, grounded in the deployed company profile.
+
+    Loaded at call time, not import time, so an operator who fills in the
+    profile sees the next idea change without a restart.
+
+    Without a profile the ideator can only talk about itself, which is exactly
+    how a deployment ends up pitching the engine's own architecture to its
+    customers. So the opening line falls back to a plain description of the
+    business rather than to nothing.
+    """
+    profile = load_company_profile() if load_company_profile is not None else {}
+    if not isinstance(profile, Mapping):
+        profile = {}
+    brand = str(profile.get("brand_name") or profile.get("company_name") or "").strip()
+    company_line = (
+        f"{brand}, a company that builds software, websites and digital "
+        "solutions for businesses"
+        if brand
+        else IDEATOR_FALLBACK_COMPANY
+    )
+
+    block = ""
+    if company_prompt_context is not None:
+        rendered = company_prompt_context(profile).strip()
+        if rendered:
+            block = f"\n{rendered}\n"
+
+    return IDEATOR_SYSTEM_PROMPT_TEMPLATE.format(
+        company_line=company_line, company_block=block
+    )
 
 
 def generate_fallback_strategic_idea(recent_topics: List[str]) -> str:
@@ -287,7 +343,7 @@ Craft an inspiring, architecturally mature, and high-authority executive idea.""
         },
     }
 
-    full_prompt = f"{IDEATOR_SYSTEM_PROMPT}\n\n---\n\n{user_prompt}"
+    full_prompt = f"{build_ideator_system_prompt()}\n\n---\n\n{user_prompt}"
 
     if default_gateway is not None:
         try:

@@ -1,17 +1,18 @@
 {
-  "company_name": "",
+  "schema_version": 1,
+  "company_name": "Fllevo",
   "legal_name": "",
-  "brand_name": "",
-  "tagline": "",
-  "description": "",
-  "industry": "",
+  "brand_name": "Fllevo",
+  "tagline": "برمجيات ومواقع وحلول رقمية تبسّط شغل شركتك",
+  "description": "Fllevo شركة برمجيات بتبني برامج وأنظمة ومواقع وحلول رقمية للشركات وأصحاب الأعمال. بنشتغل بخطوات واضحة: نفهم المشكلة الأول، نبني حل بسيط يشتغل من أول يوم، وبعدين نطوّره معاك على قد ما شغلك يكبر.",
+  "industry": "Software & Digital Solutions",
   "commercial_registration": "",
   "tax_id": "",
   "email": "",
   "support_email": "",
   "phone": "",
   "whatsapp": "",
-  "website": "",
+  "website": "https://fllevo.dev",
   "address": {
     "country": "",
     "city": "",
@@ -19,7 +20,7 @@
     "postal_code": "",
     "street": ""
   },
-  "timezone": "",
+  "timezone": "Africa/Cairo",
   "currency": "",
   "logo_url": "",
   "logo_dark_url": "",
@@ -38,13 +39,21 @@
     "body_font": "",
     "primary_font": ""
   },
-  "tone": "",
-  "language": "",
-  "target_audience": "",
-  "mission": "",
+  "tone": "بسيط وعملي ومباشر — كلام زي ما بتتكلم مع صاحب شركة، من غير مصطلحات تقنية ولا مبالغة تسويقية",
+  "language": "Arabic (simple Egyptian) and English",
+  "target_audience": "أصحاب الأعمال والشركات الصغيرة والمتوسطة اللي محتاجة موقع أو نظام أو حل رقمي يشغّل شغلها",
+  "mission": "نسهّل على الشركات إنها تشتغل بأنظمة ومواقع بسيطة وقوية، من غير تعقيد تقني.",
   "vision": "",
-  "values": [],
-  "primary_channels": [],
+  "values": [
+    "البساطة",
+    "الوضوح",
+    "حلول تشتغل فعلاً"
+  ],
+  "primary_channels": [
+    "linkedin",
+    "facebook",
+    "x"
+  ],
   "social_links": {
     "linkedin": "",
     "x": "",
@@ -55,5 +64,13 @@
     "github": ""
   },
   "default_ttl_hours": 48,
-  "custom_metadata": {}
+  "custom_metadata": {
+    "services": [
+      "برامج وأنظمة مخصصة على قد شغل العميل",
+      "مواقع وتطبيقات ويب",
+      "حلول رقمية وأتمتة للمهام المتكررة",
+      "تطوير وصيانة أنظمة موجودة"
+    ],
+    "post_style": "نصيحة عملية قصيرة ينتفع بها صاحب البيزنس، وبعدها ربط هادي بخدمة من خدماتنا. ممنوع الكلام المعقّد."
+  }
 }

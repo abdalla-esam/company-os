@@ -102,7 +102,6 @@
     "max_events": 20000
   },
   "design": {
-    "image_provider": "pollinations",
     "providers": {
       "pollinations": {
         "endpoint": "https://image.pollinations.ai/prompt/{encoded}",

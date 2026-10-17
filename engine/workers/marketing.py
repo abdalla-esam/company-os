@@ -65,6 +65,13 @@ from data.domains.marketing.gateway_ops import (  # noqa: E402
     image_prompt,
 )
 
+# The company's identity, rendered for a prompt. Absent when the deployment has
+# no profile — the worker then behaves exactly as it did before this existed.
+try:
+    from shared_kernel.brand_profile import company_prompt_context  # noqa: E402
+except ImportError:  # pragma: no cover - standalone execution
+    company_prompt_context = None  # type: ignore[assignment]
+
 # B0: the copy stage writes the engine's default artifact name — one source
 # of truth for the default, this worker has no private duplicate.
 COPY_FILE = ARTIFACT_FILE
@@ -93,6 +100,33 @@ MAX_FEEDBACK_BYTES = 16 * 1024  # mirrors workers/qa.py — a note, not an essay
 #: Automatic re-roll attempts when a proposal duplicates the rolling window.
 MAX_DEDUP_REROLLS = 2
 REVISION_FEEDBACK_HEADER = "QA reviewer feedback to address in this rewrite:"
+
+#: What the finished artifact must be, once the brief has chosen the topic. The
+#: two-version rule lives here (not in the ideator) because this is the stage
+#: that owns the artifact the reader actually sees.
+COPY_OUTPUT_INSTRUCTIONS = (
+    "Write the finished post, not a brief and not an outline.\n"
+    "Produce TWO clearly separated versions of the same post:\n"
+    "1. Arabic first — simple everyday Arabic a business owner reads without effort.\n"
+    "2. English second — the same post in natural English, not a literal translation.\n"
+    "Give each version its own Markdown heading. Keep each one tight enough for a "
+    "social post. Mention a company service only where it fits naturally."
+)
+
+
+def brand_prompt_block() -> str:
+    """The company's identity plus how this stage is to finish the post.
+
+    Returns ``""`` when the deployment has no company profile, so a caller can
+    append it unconditionally and an un-configured company gets exactly the
+    copy it got before this block existed.
+    """
+    if company_prompt_context is None:
+        return ""
+    context = company_prompt_context().strip()
+    if not context:
+        return ""
+    return f"{context}\n\n{COPY_OUTPUT_INSTRUCTIONS}"
 
 
 class MarketingWorkerError(CapsuleError):
@@ -160,6 +194,18 @@ class MarketingWorker(BaseWorker):
         self._require_copy_flag(manifest)
         prior_state = State.parse(manifest["state"])
         prompt = self._resolve_prompt(manifest)
+
+        # Who the company is, and how this stage finishes the post. Appended
+        # after the brief so the brief sets the topic and the company DNA sets
+        # the voice; QA feedback (below) still lands last, closest to the task.
+        company_block = brand_prompt_block()
+        if company_block:
+            prompt = f"{prompt}\n\n{company_block}"
+            self.record(
+                manifest,
+                "company brand context injected into the copy prompt",
+            )
+
         feedback = self._read_feedback(capsule_path)
 
         if prior_state is not State.IN_PROGRESS:
