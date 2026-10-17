@@ -461,6 +461,15 @@ class RouterParity(_CatalogueCase):
                     (after.action, after.worker),
                     msg=f"{state.value}: card changed routing",
                 )
+                if state is State.PENDING_DESIGN and "copy sign-off" in after.reason:
+                    # ``pending_design`` is deliberately parked by the copy
+                    # sign-off policy (``config/engine.json`` -> ``copy_signoff``)
+                    # until a human reads the copy: a hold that is the *policy's*
+                    # doing, identical with and without a card. Every other state
+                    # must still execute, so an accidental hold anywhere else
+                    # fails right here.
+                    self.assertEqual(before.action, after.action)
+                    continue
                 self.assertTrue(after.should_execute, after.reason)
 
     def test_lease_rules_are_untouched_by_a_card(self) -> None:

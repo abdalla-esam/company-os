@@ -44,6 +44,7 @@ from __future__ import annotations
 import hashlib
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -190,6 +191,14 @@ class QAWorker(BaseWorker):
             if requires_image and not has_image:
                 destination = State.PENDING_DESIGN
                 why = "qa passed: copy approved and visual prompt verified (Zero Waste QA Gate passed) -> design stage"
+                if self._copy_signoff_required(manifest):
+                    await_digest = self._record_copy_signoff(manifest, capsule_path)
+                    self.record(
+                        manifest,
+                        "copy sign-off requested before the design stage "
+                        f"(copy sha256 {await_digest[:16]}…)",
+                    )
+                    why += " (held for a human copy sign-off before the image is made)"
             else:
                 destination = State.PENDING_APPROVAL
                 why = f"qa passed: {feedback} -> manager approval"
@@ -205,6 +214,43 @@ class QAWorker(BaseWorker):
             why=f"qa rejected: {feedback} (feedback saved to {artifact.name})",
         )
         return manifest
+
+    @staticmethod
+    def _copy_signoff_required(manifest: dict[str, Any]) -> bool:
+        """Whether this domain's copy needs a human sign-off before design."""
+        try:
+            from capsule_engine.policy import load_policy
+
+            return load_policy().copy_signoff_required(manifest.get("domain"))
+        except Exception:  # a policy that cannot load never wedges a capsule
+            return False
+
+    @staticmethod
+    def _record_copy_signoff(manifest: dict[str, Any], capsule_path: str) -> str:
+        """Park the copy for a human, binding the hash they will be judging.
+
+        The digest is taken at the moment of asking so the sign-off names the
+        exact text that was approved. A copy edited afterwards no longer matches
+        the record, and the decision endpoint refuses it rather than approving
+        words nobody read.
+
+        Returns:
+            The bound copy digest (empty when there is no copy on disk).
+        """
+        digest = ""
+        copy_file = Path(capsule_path) / COPY_FILE
+        if copy_file.is_file():
+            digest = hashlib.sha256(copy_file.read_bytes()).hexdigest()
+
+        if "metadata" not in manifest or not isinstance(manifest["metadata"], dict):
+            manifest["metadata"] = {}
+        manifest["metadata"]["copy_signoff"] = {
+            "decision": "awaiting",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "requested_by": "qa",
+            "copy_sha256": digest,
+        }
+        return digest
 
     @classmethod
     def _verify_visual_prompt(

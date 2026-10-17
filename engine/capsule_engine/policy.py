@@ -249,6 +249,31 @@ class GatesPolicy:
 
 
 @dataclass(frozen=True)
+class CopySignoffPolicy:
+    """Whether a human reads the copy before the design stage spends anything.
+
+    The design stage is the first step that calls a paid image model, and the
+    copy is the only artifact that decides whether the post is worth making at
+    all. A domain can therefore require a human to sign the copy off, holding
+    the capsule at ``pending_design``: the copy exists, the image does not yet.
+
+    ``domains`` empty means every domain; a populated list means only those.
+    A disabled policy means the pipeline runs straight through as before.
+    """
+
+    enabled: bool = False
+    domains: frozenset[str] = field(default_factory=frozenset)
+
+    def required_for(self, domain: Optional[str]) -> bool:
+        """Whether ``domain`` must stop for a copy sign-off."""
+        if not self.enabled:
+            return False
+        if not self.domains:
+            return True
+        return str(domain or "").strip() in self.domains
+
+
+@dataclass(frozen=True)
 class TracePolicy:
     """Execution trace toggles and the gear price table (estimated cost)."""
 
@@ -284,6 +309,9 @@ class DomainPolicy:
     gates: GatesPolicy
     trace: TracePolicy
 
+    #: Whether this domain's copy needs a human sign-off before design spends.
+    copy_signoff_enabled: bool = False
+
 
 @dataclass(frozen=True)
 class EnginePolicy:
@@ -294,6 +322,7 @@ class EnginePolicy:
     memory: MemoryPolicy = field(default_factory=MemoryPolicy)
     dedup: DedupPolicy = field(default_factory=DedupPolicy)
     trace: TracePolicy = field(default_factory=TracePolicy)
+    copy_signoff: CopySignoffPolicy = field(default_factory=CopySignoffPolicy)
     path: Optional[str] = None
     issues: Tuple[str, ...] = ()
 
@@ -305,7 +334,12 @@ class EnginePolicy:
             memory=self.memory,
             gates=self.gates,
             trace=self.trace,
+            copy_signoff_enabled=self.copy_signoff.required_for(domain),
         )
+
+    def copy_signoff_required(self, domain: Optional[str]) -> bool:
+        """Whether ``domain`` must stop for a human copy sign-off."""
+        return self.copy_signoff.required_for(domain)
 
 
 def default_policy() -> EnginePolicy:
@@ -601,6 +635,39 @@ def _apply_env(policy: EnginePolicy, issues: list[str]) -> EnginePolicy:
 _CACHE: Optional[EnginePolicy] = None
 
 
+def _parse_copy_signoff(
+    raw: Mapping[str, Any], issues: list[str]
+) -> CopySignoffPolicy:
+    """Build a :class:`CopySignoffPolicy` from a raw JSON object (fail-safe)."""
+    base = CopySignoffPolicy()
+    values: Dict[str, Any] = {}
+
+    if "enabled" in raw:
+        coerced = _as_bool(raw.get("enabled"), base.enabled)
+        if coerced is None:
+            issues.append("copy_signoff.enabled is not a boolean; default kept")
+        else:
+            values["enabled"] = coerced
+
+    domains_raw = raw.get("domains")
+    if domains_raw is not None:
+        if not isinstance(domains_raw, (list, tuple)):
+            issues.append("copy_signoff.domains must be a list; default kept")
+        else:
+            names: list[str] = []
+            for item in domains_raw:
+                if isinstance(item, str) and item.strip():
+                    names.append(item.strip())
+                else:
+                    issues.append(
+                        "copy_signoff.domains entries must be non-empty strings; "
+                        "entry ignored"
+                    )
+            values["domains"] = frozenset(names)
+
+    return replace(base, **values)
+
+
 def load_policy(
     path: Optional[str | os.PathLike[str]] = None,
     *,
@@ -644,11 +711,13 @@ def load_policy(
     memory_raw = _as_mapping(raw.get("memory"))
     dedup_raw = _as_mapping(raw.get("dedup"))
     trace_raw = _as_mapping(raw.get("trace"))
+    copy_signoff_raw = _as_mapping(raw.get("copy_signoff"))
     for section, value in (
         ("gates", raw.get("gates")),
         ("memory", raw.get("memory")),
         ("dedup", raw.get("dedup")),
         ("trace", raw.get("trace")),
+        ("copy_signoff", raw.get("copy_signoff")),
     ):
         if value is not None and not isinstance(value, Mapping):
             issues.append(f"policy section '{section}' must be an object — ignored")
@@ -661,6 +730,7 @@ def load_policy(
         memory=_parse_memory(memory_raw, issues),
         dedup=_parse_dedup(dedup_raw, issues),
         trace=_parse_trace(trace_raw, issues),
+        copy_signoff=_parse_copy_signoff(copy_signoff_raw, issues),
         path=str(resolved),
         issues=tuple(issues),
     )

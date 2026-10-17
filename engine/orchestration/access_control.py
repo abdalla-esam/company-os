@@ -157,6 +157,7 @@ ROUTE_CAPABILITIES: Mapping[tuple[str, str], str] = {
     # --- human decisions ----------------------------------------------------
     ("POST", "/api/capsules/{capsule_id}/approve"): "capsule:approve",
     ("POST", "/api/capsules/{capsule_id}/reject"): "capsule:reject",
+    ("POST", "/api/capsules/{capsule_id}/copy_signoff"): "capsule:approve",
     ("POST", "/api/capsules/{capsule_id}/gates/{gate_id}/open"): "factory:read",
     ("POST", "/api/capsules/{capsule_id}/gates/{gate_id}/decision"): "capsule:approve",
     ("POST", "/api/capsules/{capsule_id}/viewed"): "factory:read",

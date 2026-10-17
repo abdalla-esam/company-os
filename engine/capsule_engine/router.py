@@ -369,6 +369,15 @@ class CapsuleRouter:
                         ),
                     )
 
+        # The copy sign-off: a domain may require a human to read the copy
+        # before the design stage spends on an image model, so the capsule parks
+        # here — copy written, QA passed, image not yet made — until the
+        # decision is recorded on the manifest.
+        if state is State.PENDING_DESIGN:
+            signoff_decision = self._decide_copy_signoff(base, manifest)
+            if signoff_decision is not None:
+                return signoff_decision
+
         # B1: a valid card's declaration for this state wins first.
         if profile is not None:
             declared = profile.worker_for(state.value)
@@ -416,6 +425,66 @@ class CapsuleRouter:
             reason=reason,
             profile_rejected=profile_error,
         )
+
+    def _decide_copy_signoff(
+        self, base: dict, manifest: dict
+    ) -> "RouteDecision | None":
+        """Hold ``pending_design`` until a human signs the copy off.
+
+        Returns ``None`` when no sign-off is owed — the domain does not require
+        one, or the decision is already on the manifest — so the caller routes
+        to the design stage as before. Fail-closed on a missing record: a policy
+        that says "a human reads the copy first" is not satisfied by silence,
+        and the hold names the way out (record the decision) rather than
+        stalling quietly.
+        """
+        try:
+            from capsule_engine.policy import load_policy
+
+            required = load_policy().copy_signoff_required(manifest.get("domain"))
+        except Exception:  # a policy that cannot load never wedges a capsule
+            return None
+        if not required:
+            return None
+
+        state = self._copy_signoff_decision(manifest)
+        if state in ("approved", "waived"):
+            return None
+        if state == "rejected":
+            return RouteDecision(
+                **base,
+                action=Action.HOLD,
+                reason=(
+                    "copy sign-off rejected — the author must rework the copy "
+                    "(the capsule returns to the factory on the next decision)"
+                ),
+            )
+
+        detail = (
+            "no decision recorded yet"
+            if not state
+            else f"decision recorded: {state}"
+        )
+        return RouteDecision(
+            **base,
+            action=Action.HOLD,
+            reason=(
+                "awaiting copy sign-off — the copy is written and QA has passed, "
+                "and the image is not made yet; a human must approve or reject "
+                f"the copy ({detail})"
+            ),
+        )
+
+    @staticmethod
+    def _copy_signoff_decision(manifest: dict) -> str:
+        """The recorded copy sign-off decision, or empty when none exists."""
+        metadata = manifest.get("metadata")
+        if not isinstance(metadata, dict):
+            return ""
+        record = metadata.get("copy_signoff")
+        if not isinstance(record, dict):
+            return ""
+        return str(record.get("decision") or "").strip().lower()
 
     def _decide_pending_approval(self, base: dict, manifest: dict) -> RouteDecision:
         """The gate: freeze past TTL, auto-approve expert autonomy, else HOLD.
