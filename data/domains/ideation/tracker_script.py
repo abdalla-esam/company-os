@@ -162,8 +162,8 @@ def settle_gate_entry(entry: Dict[str, Any]) -> Optional[str]:
 
 def settle_gates() -> None:
     """Pull approved gates into tickets. Sector pulls; gate never calls out."""
-    created = []
-    done = set()
+    settled = []
+    claimed = {}  # gate_id -> the tickets that already claim it
 
     # Settle memory = every ticket this sector ever pulled (live tickets + archive)
     for root, _dirs, files in os.walk(_HERE):
@@ -175,7 +175,7 @@ def settle_gates() -> None:
             if isinstance(ticket, dict):
                 via = ticket.get("via")
                 if isinstance(via, str):
-                    done.add(via)
+                    claimed.setdefault(via, []).append(path)
 
     queue = os.path.join(GATE_DIR, "gate_queue")
     if os.path.isdir(queue):
@@ -187,7 +187,17 @@ def settle_gates() -> None:
             if not isinstance(entry, dict):
                 continue
             gid = settle_gate_entry(entry)
-            if gid is None or gid in done:
+            if gid is None:
+                continue
+            if gid in claimed:
+                # Claimed before it was decided: auto_ideator writes its ticket
+                # while the gate is still open, so the approved gate *is* that
+                # ticket's decision — accept it in place instead of leaving it
+                # at the human seat forever.
+                for claimant in claimed[gid]:
+                    accepted = accept_claimed_ticket(claimant, gid, entry)
+                    if accepted:
+                        settled.append(accepted)
                 continue
 
             reason = "approved via gate %s by %s" % (
@@ -200,12 +210,62 @@ def settle_gates() -> None:
                 "reason": reason,
             }
             path, _ = save_ticket(entry.get("source", {}), decision, via=gid)
-            created.append(path)
+            settled.append(path)
 
     if SettleOutput is not None:
-        print(SettleOutput(settled=created).model_dump_json(ensure_ascii=False))
+        print(SettleOutput(settled=settled).model_dump_json(ensure_ascii=False))
     else:
-        print(json.dumps({"settled": created}, ensure_ascii=False))
+        print(json.dumps({"settled": settled}, ensure_ascii=False))
+
+
+def accept_claimed_ticket(path: str, gate_id: str, entry: Dict[str, Any]) -> Optional[str]:
+    """Accept the ticket that claimed this gate while the gate was still open.
+
+    ``auto_ideator`` writes its ticket *before* a human decides, so the ticket
+    holds the human seat: ``pending_approval`` with a ``needs_gate`` decision.
+    The approved gate is that ticket's decision, so it becomes dispatchable in
+    exactly the shape :func:`save_ticket` writes for a settled gate
+    (``state: open`` + ``decision.status: accepted``) — the shape the
+    dispatcher and the settle bridge act on. Without this the idea sits at the
+    human seat forever asking for a decision already made, and no capsule is
+    ever built for it.
+
+    Anything not waiting on this gate is left byte-for-byte alone.
+    """
+    ticket = _read_json(path)
+    if not isinstance(ticket, dict):
+        return None
+    if ticket.get("state") not in ("pending_approval", "needs_revision"):
+        return None
+    decision = ticket.get("decision")
+    decision = decision if isinstance(decision, dict) else {}
+    if decision.get("status") != "needs_gate":
+        return None
+
+    reason = "approved via gate %s by %s" % (
+        gate_id,
+        entry.get("decided_by") or "human_manager",
+    )
+    history = ticket.get("history")
+    history = list(history) if isinstance(history, list) else []
+    history.append({
+        "at": datetime.now(timezone.utc).isoformat(),
+        "from_state": ticket.get("state"),
+        "to_state": "open",
+        "by": "settle",
+        "why": reason,
+    })
+    _write_json(path, {
+        "state": "open",
+        "decision": {
+            "status": "accepted",
+            "risk_tier": entry.get("risk_tier"),
+            "reason": reason,
+            "ticket": decision.get("ticket"),
+        },
+        "history": history,
+    })
+    return path
 
 
 def save_ticket(
