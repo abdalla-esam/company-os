@@ -22,7 +22,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
-from typing import NamedTuple
+from typing import Mapping, NamedTuple
 
 from tests._bootstrap import (
     REPO_ROOT,
@@ -65,6 +65,44 @@ def _real_tree_changes(
     return changes
 
 
+#: The content roots a beat works through: what is in them decides how much the
+#: beat does. They are redirected (below) so the beat spec runs over an empty
+#: vault.
+_BEAT_CONTENT_ROOTS: tuple[str, ...] = (
+    "CAPSULES_SPOOL",
+    "CAPSULES_SANDBOX",
+    "DOMAINS_DIR",
+    "AGENCY_WORK_QUEUE_DIR",
+)
+
+
+def _empty_vault_env(base: dict[str, str]) -> dict[str, str]:
+    """``base`` with every content root pointed at a fresh, empty directory.
+
+    The run vault is shared with every other module, so by the time this test
+    runs it holds *their* capsules and tickets — a snapshot taken mid-suite
+    found seven leftover capsules, four of them carrying work. A beat over that
+    does the real thing: it executed six capsules, called the live copy and
+    image providers, and took 67s against a 30s smoke budget. The contract this
+    test asserts is that the script bootstraps its imports, resolves its
+    production paths, and exits 0 — not that it can process another module's
+    fixtures. An empty vault exercises exactly that, and keeps a smoke test from
+    spending money on a configured provider (a leak the repo snapshot below
+    still catches).
+
+    The redirected roots live *inside* ``VAULT``, so the isolation assertion
+    above holds for them too.
+    """
+    empty_root = VAULT / "beat_empty"
+    empty = dict(base)
+    for var in _BEAT_CONTENT_ROOTS:
+        current = Path(base[var])
+        target = empty_root / current.name
+        target.mkdir(parents=True, exist_ok=True)
+        empty[var] = str(target)
+    return empty
+
+
 class SubprocessSpec(NamedTuple):
     name: str
     script: Path
@@ -72,6 +110,7 @@ class SubprocessSpec(NamedTuple):
     cwd: Path
     stdin_payload: str | None = None
     expected_rc: int = 0
+    env_overrides: Mapping[str, str] | None = None
 
 
 class TestSubprocessEntryPoints(unittest.TestCase):
@@ -216,6 +255,10 @@ class TestSubprocessEntryPoints(unittest.TestCase):
                 script=REPO_ROOT / "engine" / "orchestration" / "pulse.py",
                 args=[],
                 cwd=REPO_ROOT,
+                # A beat is the one entrypoint here with no harmless verb: with
+                # fixtures in the vault it processes them for real. Give it an
+                # empty vault so it proves bootstrap + exit 0 and nothing more.
+                env_overrides=_empty_vault_env(env),
             ),
             SubprocessSpec(
                 name="pulse -> dispatcher (list)",
@@ -245,7 +288,7 @@ class TestSubprocessEntryPoints(unittest.TestCase):
                     [sys.executable, str(spec.script), *spec.args],
                     input=spec.stdin_payload,
                     cwd=str(spec.cwd),
-                    env=env,
+                    env={**env, **(spec.env_overrides or {})},
                     capture_output=True,
                     text=True,
                     timeout=30,
