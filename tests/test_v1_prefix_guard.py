@@ -145,7 +145,7 @@ class ExistingPublicSurfaceIsUnchanged(V1PrefixGuardTestCase):
     """``/api/`` behaviour is untouched by the new guarded prefix."""
 
     def test_health_stays_public(self) -> None:
-        for path in ("/api/health", "/cockpit/api/health"):
+        for path in ("/api/health",):
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200, response.text)

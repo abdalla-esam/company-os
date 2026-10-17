@@ -10,18 +10,19 @@ capability entry and nothing failed. The namespace the mobile contract
 bug at a larger scale.
 
 This module reads the real FastAPI ``app.routes`` (never a hand-written list)
-and enforces five invariants:
+and enforces four invariants:
 
 1. **Coverage** — every guarded live route is either DECLARED in the map or an
    explicit ``PUBLIC_API_PATHS`` exception. Nothing else may be reachable.
 2. **No stale policy** — every declared entry names a route that really exists.
 3. **No dead policy** — every declared path is actually guarded; a rule for a
-   path nobody guards protects nothing, and is what a mis-derived mirror would
-   produce.
-4. **Mirror parity** — ``/cockpit/api/*`` is exactly the canonical ``/api/*``
-   set, twin for twin, and no twin is fabricated for another namespace.
-5. **Explicit exclusions** — routes that sit outside every guarded prefix are
+   path nobody guards protects nothing.
+4. **Explicit exclusions** — routes that sit outside every guarded prefix are
    pinned by name with a reason, so one cannot appear silently.
+
+The retired ``/cockpit/api/*`` mirror is asserted gone rather than asserted
+equal: it doubled the route table and the map for a web cockpit that was never
+shipped.
 
 Both pinned sets are frozen and asserted to only ever shrink: a new gap fails
 loudly instead of being absorbed, and a fixed one must be struck deliberately.
@@ -102,11 +103,15 @@ class RouteCapabilityMapIsExhaustive(unittest.TestCase):
 
     def test_the_live_app_is_actually_walked(self) -> None:
         # A route-less or stub app would make every assertion below vacuous.
+        # The floor is a sanity check, not a target: it only has to sit well
+        # above a stub. It was 100 while every handler was also dual-mounted
+        # under /cockpit/api; that mirror is retired, so the real table is
+        # roughly half its former size.
         self.assertGreater(
-            len(_live_routes()), 100, "route walk found suspiciously few routes"
+            len(_live_routes()), 50, "route walk found suspiciously few routes"
         )
         self.assertGreater(
-            len(access_control.declared_rules()), 100, "declared rule set collapsed"
+            len(access_control.declared_rules()), 50, "declared rule set collapsed"
         )
 
     def test_every_guarded_route_is_declared_or_an_explicit_public_exception(self) -> None:
@@ -198,63 +203,54 @@ class RouteCapabilityMapIsExhaustive(unittest.TestCase):
                     )
 
 
-class CockpitMirrorIsDerivedNotDuplicated(unittest.TestCase):
-    """``/cockpit/api/*`` is the canonical ``/api/*`` set, twin for twin."""
+class TheCockpitMirrorIsRetired(unittest.TestCase):
+    """``/cockpit/api/*`` used to be a mechanical twin of every ``/api/*`` route.
 
-    def test_declared_mirror_is_exactly_the_canonical_set(self) -> None:
-        declared = set(access_control.declared_rules())
-        canonical = {
-            (method, path)
-            for (method, path) in declared
-            if path.startswith(access_control.CANONICAL_API_PREFIX)
-        }
-        mirrored = {
-            (method, path)
-            for (method, path) in declared
-            if path.startswith(access_control.COCKPIT_MIRROR_PREFIX + "/api/")
-        }
-        expected = {
-            (method, access_control.COCKPIT_MIRROR_PREFIX + path)
-            for (method, path) in canonical
-        }
-        self.assertTrue(canonical, "no canonical /api rules found at all")
-        self.assertEqual(
-            sorted(mirrored),
-            sorted(expected),
-            "the cockpit mirror drifted from the canonical rule set — it is "
-            "derived mechanically by _mirror(), so the two can never differ",
-        )
+    Every handler was dual-mounted, which doubled the route table and the
+    capability map for a web cockpit that was never shipped. The prefix is no
+    longer guarded, declared, or mounted; these pin that so a reintroduced twin
+    has to be argued for here first.
+    """
 
-    def test_no_twin_is_fabricated_for_another_namespace(self) -> None:
-        mirror_root = access_control.COCKPIT_MIRROR_PREFIX + "/"
-        fabricated = sorted(
-            {
-                (method, path)
-                for (method, path) in access_control.declared_rules()
-                if path.startswith(mirror_root)
-                and not path.startswith(mirror_root + "api/")
-            }
+    MIRROR_PATHS = (
+        "/cockpit/api/gates",
+        "/cockpit/api/auth/login",
+        "/cockpit/api/health",
+        "/cockpit/api/capsules",
+    )
+
+    def test_mirror_prefix_is_not_guarded(self) -> None:
+        for path in self.MIRROR_PATHS:
+            with self.subTest(path=path):
+                self.assertFalse(
+                    access_control.is_guarded(path),
+                    f"{path} is guarded — the retired cockpit mirror is back",
+                )
+
+    def test_no_rule_declares_a_mirror_path(self) -> None:
+        leaked = sorted(
+            (method, path)
+            for (method, path) in access_control.declared_rules()
+            if path.startswith("/cockpit/")
         )
         self.assertEqual(
-            fabricated,
+            leaked,
             [],
-            "invented a cockpit twin for a path the API does not mount (a "
-            "non-/api template was mirrored) — dead policy that hides whether "
-            f"the route has a capability of its own: {fabricated}",
+            "a /cockpit rule survived in the capability map — the map no longer "
+            "mirrors anything, so this is dead policy",
         )
 
-    def test_live_routes_mirror_each_other(self) -> None:
-        live = _live_routes()
-        canonical = {(method, path) for (method, path) in live if path.startswith("/api/")}
-        mirrored = {
-            (method, path) for (method, path) in live if path.startswith("/cockpit/api/")
-        }
-        expected = {(method, "/cockpit" + path) for (method, path) in canonical}
+    def test_the_api_does_not_mount_a_mirror_route(self) -> None:
+        duplicated = sorted(
+            (method, path)
+            for (method, path) in _live_routes()
+            if path.startswith("/cockpit/")
+        )
         self.assertEqual(
-            sorted(mirrored),
-            sorted(expected),
-            "the API mounts an /api route without its /cockpit/api twin (or the "
-            "reverse) — the mirror is no longer mechanical",
+            duplicated,
+            [],
+            "the API still mounts /cockpit routes; the duplicate is only half "
+            "removed",
         )
 
 

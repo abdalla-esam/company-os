@@ -18,8 +18,7 @@ Two rules make this layer safe rather than decorative:
    whatever decisions they make. A key that can approve but not read is a key
    that cannot see what it is approving.
 
-Route keys are canonical ``/api/*`` templates; the ``/cockpit/api/*`` mirror
-the API also mounts is derived mechanically, so the two can never drift.
+Route keys are canonical ``/api/*`` templates — one rule per mounted route.
 
 The legacy shared token survives the migration as an explicit, switchable
 **root principal** (:data:`LEGACY_ROOT_ENV`), recorded in every audit line as
@@ -53,8 +52,6 @@ from capsule_engine.exceptions import CapabilityError
 logger = logging.getLogger("orchestration.access_control")
 
 __all__ = [
-    "CANONICAL_API_PREFIX",
-    "COCKPIT_MIRROR_PREFIX",
     "GUARDED_PREFIXES",
     "LEGACY_ROOT_ENV",
     "LEGACY_ROOT_SUBJECT",
@@ -82,20 +79,13 @@ __all__ = [
 # the first place — an unguarded path is not "checked later", it is not checked
 # at all. Guarding the namespace costs nothing while it is empty, and it makes
 # the default deny cover every route from the moment it is mounted.
-GUARDED_PREFIXES: tuple[str, ...] = ("/api/", "/cockpit/api/", "/v1/")
+GUARDED_PREFIXES: tuple[str, ...] = ("/api/", "/v1/")
 
 # Reachable without a credential: a health probe that must answer while the
 # operator is still configuring the server, and the login endpoint.
 PUBLIC_API_PATHS: frozenset[str] = frozenset(
-    {"/api/health", "/cockpit/api/health", "/api/auth/login", "/cockpit/api/auth/login"}
+    {"/api/health", "/api/auth/login"}
 )
-
-COCKPIT_MIRROR_PREFIX = "/cockpit"
-
-#: The canonical namespace whose ``/cockpit/api/*`` twin is derived mechanically
-#: (``api.py`` decorates both spellings on every handler). Only templates under
-#: this prefix have a mirror; other guarded namespaces are their own routes.
-CANONICAL_API_PREFIX = "/api/"
 
 # Migration switch for the legacy shared token (see module docstring).
 LEGACY_ROOT_ENV = "AGENCY_LEGACY_ROOT_TOKEN"
@@ -207,8 +197,6 @@ ROUTE_CAPABILITIES: Mapping[tuple[str, str], str] = {
     # with the missing-object body, never 403. The decision is the same
     # branch-scoped ``capsule:approve`` the cockpit's routes require (a reject is
     # enforced to ``capsule:reject`` on the resource inside the service's lock).
-    # ``_mirror()`` leaves these templates alone — ``/v1`` has no ``/cockpit``
-    # twin.
     ("GET", "/v1/capsules/{capsule_id}/review"): "domain:read",
     ("POST", "/v1/decisions"): "capsule:approve",
     # --- Slice M1a: the aggregate reads (home, attention, lists, details) ----
@@ -240,33 +228,14 @@ ROUTE_CAPABILITIES: Mapping[tuple[str, str], str] = {
 }
 
 
-def _mirror(template: str) -> str:
-    """The ``/cockpit/api/*`` twin the API mounts alongside a canonical route.
-
-    Only the canonical ``/api/*`` namespace is mirrored, because only it is
-    dual-mounted. A template from another guarded namespace (``/v1/*``, the
-    mobile contract) is already its own route and is returned unchanged:
-    prefixing it would invent a ``/cockpit/v1/*`` rule for a path the API never
-    mounts — dead policy that looks like coverage and quietly sidesteps the real
-    question (does this route have a capability of its own?).
-    """
-    if not template.startswith(CANONICAL_API_PREFIX):
-        return template
-    return COCKPIT_MIRROR_PREFIX + template
-
-
 def declared_rules() -> dict[tuple[str, str], str]:
-    """Every declared rule, canonical plus cockpit mirror.
+    """Every declared rule, one per mounted ``/api/*`` or ``/v1/*`` template.
 
     The coverage test compares this against the application's real routes in
     both directions, so a rule for a route that no longer exists is caught
     just as loudly as a route with no rule.
     """
-    rules: dict[tuple[str, str], str] = {}
-    for (method, template), capability in ROUTE_CAPABILITIES.items():
-        rules[(method, template)] = capability
-        rules[(method, _mirror(template))] = capability
-    return rules
+    return dict(ROUTE_CAPABILITIES)
 
 
 def _compile_template(template: str) -> "re.Pattern[str]":
@@ -287,7 +256,7 @@ def _compile_template(template: str) -> "re.Pattern[str]":
     return re.compile("^" + "".join(parts) + "$")
 
 
-# Compiled once, from the *full* rule set (canonical plus cockpit mirror), and
+# Compiled once, from the full rule set, and
 # keyed by METHOD as well as path: ``POST /api/capsules`` and
 # ``GET /api/capsules`` are different decisions on the same URL. Fewer
 # placeholders first, so a literal path always wins over a parameterised

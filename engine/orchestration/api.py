@@ -409,7 +409,6 @@ async def api_root() -> Dict[str, Any]:
 
 
 @router.get("/api/events")
-@router.get("/cockpit/api/events")
 async def event_stream(request: Request):
     """Server-Sent Events (SSE) stream for live capsule and governance updates.
 
@@ -522,7 +521,6 @@ def _task_type_health() -> Dict[str, Any]:
 
 
 @router.get("/api/health")
-@router.get("/cockpit/api/health")
 async def health() -> Dict[str, Any]:
     """Open liveness probe: no auth, no data — everything else needs the token.
 
@@ -538,7 +536,6 @@ async def health() -> Dict[str, Any]:
 
 
 @router.get("/api/task-types")
-@router.get("/cockpit/api/task-types")
 async def list_task_types_endpoint() -> Dict[str, Any]:
     """Read-only catalogue of the declared task types (``config/task_types/``).
 
@@ -560,7 +557,6 @@ async def list_task_types_endpoint() -> Dict[str, Any]:
 
 
 @router.get("/api/task-types/{task_type_id}")
-@router.get("/cockpit/api/task-types/{task_type_id}")
 async def get_task_type_endpoint(task_type_id: str) -> Dict[str, Any]:
     """One task type: its declared pipeline, plus the B1 card it renders to."""
     if not task_type_engine.is_valid_id(task_type_id):
@@ -586,7 +582,6 @@ async def get_task_type_endpoint(task_type_id: str) -> Dict[str, Any]:
 
 
 @router.get("/api/metrics")
-@router.get("/cockpit/api/metrics")
 async def get_metrics() -> Response:
     """Prometheus exposition: HTTP counters plus live vault gauges.
 
@@ -634,7 +629,6 @@ async def get_metrics() -> Response:
 # --------------------------------------------------------------------------- #
 
 @router.post("/api/auth/login")
-@router.post("/cockpit/api/auth/login")
 async def login_endpoint(req: LoginRequest) -> Dict[str, Any]:
     """Sovereign person login: authenticates against local registry and issues capability token."""
     user = authenticate_user(req.username, req.password)
@@ -657,7 +651,6 @@ async def login_endpoint(req: LoginRequest) -> Dict[str, Any]:
 
 
 @router.get("/api/auth/me")
-@router.get("/cockpit/api/auth/me")
 async def get_current_user_endpoint(request: Request) -> Dict[str, Any]:
     """Retrieve identity, active grants, and profile of the authenticated caller."""
     principal = getattr(request.state, "principal", None)
@@ -680,14 +673,12 @@ async def get_current_user_endpoint(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/api/auth/logout")
-@router.post("/cockpit/api/auth/logout")
 async def logout_endpoint(request: Request) -> Dict[str, Any]:
     """Sovereign session logout."""
     return {"status": "success", "message": "Logged out successfully."}
 
 
 @router.get("/api/stats")
-@router.get("/cockpit/api/stats")
 async def get_system_stats() -> Dict[str, Any]:
     """Calculate live metrics across all domains, gates, and factory spool.
 
@@ -772,7 +763,6 @@ async def get_system_stats() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/telemetry/costs")
-@router.get("/cockpit/api/telemetry/costs")
 async def get_telemetry_costs() -> Dict[str, Any]:
     """Granular cost accounting in USD and token telemetry across sectors and deliverables."""
     stats = read_index.stats() or {}
@@ -806,7 +796,6 @@ class FinanceKillRequest(BaseModel):
 
 
 @router.get("/api/finance/status")
-@router.get("/cockpit/api/finance/status")
 async def get_finance_status() -> Dict[str, Any]:
     """The spend gate's live state: today/month spend, caps, subscriptions, switch.
 
@@ -826,7 +815,6 @@ async def get_finance_status() -> Dict[str, Any]:
 
 
 @router.post("/api/finance/kill")
-@router.post("/cockpit/api/finance/kill")
 async def set_finance_kill_switch(req: FinanceKillRequest, request: Request) -> Dict[str, Any]:
     """Flip the spend kill switch (capability ``finance:control``).
 
@@ -850,7 +838,6 @@ async def set_finance_kill_switch(req: FinanceKillRequest, request: Request) -> 
 
 
 @router.get("/api/telemetry/reviewers")
-@router.get("/cockpit/api/telemetry/reviewers")
 async def get_telemetry_reviewers() -> Dict[str, Any]:
     """Audit scorecard for gate decisions, human reviewers, and acceptance rates."""
     stats = read_index.stats() or {}
@@ -907,7 +894,6 @@ async def get_telemetry_reviewers() -> Dict[str, Any]:
 
 
 @router.get("/api/engine/gears/health")
-@router.get("/cockpit/api/engine/gears/health")
 async def get_gears_health() -> Dict[str, Any]:
     """Health and probe inspection for the 16 constitutional gears."""
     from capsule_engine.gear_registry import registry_summary
@@ -924,7 +910,6 @@ async def get_gears_health() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/pillars")
-@router.get("/cockpit/api/pillars")
 async def get_pillars_endpoint() -> Dict[str, Any]:
     """Provide the 4 executive macro-pillars computed from live disk state."""
     from dataclasses import asdict
@@ -954,7 +939,6 @@ async def get_pillars_endpoint() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/audit/spool")
-@router.get("/cockpit/api/audit/spool")
 async def get_audit_spool_endpoint() -> Dict[str, Any]:
     """Verify cryptographic integrity of the entire capsule spool and audit ledger."""
     from capsule_engine.audit import verify_spool
@@ -982,7 +966,6 @@ async def get_audit_spool_endpoint() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.post("/api/index/rebuild")
-@router.post("/cockpit/api/index/rebuild")
 async def rebuild_read_index() -> Dict[str, Any]:
     """Force a full rebuild of the read index from the files (the truth)."""
     count = await asyncio.to_thread(read_index.rebuild)
@@ -998,7 +981,6 @@ async def rebuild_read_index() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/domains")
-@router.get("/cockpit/api/domains")
 async def list_domains() -> List[Dict[str, Any]]:
     """Declared branches with their live load and autonomy level.
 
@@ -1052,7 +1034,6 @@ def _branch_doc_stub(title: str) -> str:
 
 
 @router.post("/api/domains")
-@router.post("/cockpit/api/domains")
 async def create_domain(req: CreateDomainRequest) -> Dict[str, Any]:
     """Create a new company branch directory dynamically on disk (Expansion Brick)."""
     clean_id = req.domain_id.strip().lower()
@@ -1254,7 +1235,6 @@ def _project_ticket(
 
 
 @router.get("/api/tickets")
-@router.get("/cockpit/api/tickets")
 async def list_tickets(
     request: Request = None,
     sector: Optional[str] = None,
@@ -1370,7 +1350,6 @@ async def list_tickets(
 
 
 @router.post("/api/tickets")
-@router.post("/cockpit/api/tickets")
 async def create_ticket(req: CreateTicketRequest, request: Request) -> Dict[str, Any]:
     """Create a new manual ticket in scratch or approved stage."""
     target_sector = req.sector.strip().lower()
@@ -1503,7 +1482,6 @@ async def create_ticket(req: CreateTicketRequest, request: Request) -> Dict[str,
 
 
 @router.patch("/api/tickets/{ticket_id}/context")
-@router.patch("/cockpit/api/tickets/{ticket_id}/context")
 async def update_ticket_context(ticket_id: str, req: UpdateTicketContextRequest, request: Request, sector: Optional[str] = None) -> Dict[str, Any]:
     """Update dynamic context dictionary and metadata of an existing ticket with changelog auditing."""
     clean_id = Path(ticket_id).name.strip()
@@ -1565,7 +1543,6 @@ async def update_ticket_context(ticket_id: str, req: UpdateTicketContextRequest,
 
 
 @router.post("/api/tickets/{ticket_id}/promote")
-@router.post("/cockpit/api/tickets/{ticket_id}/promote")
 async def promote_ticket_endpoint(ticket_id: str, request: Request, sector: Optional[str] = None) -> Dict[str, Any]:
     """Promote a ticket from scratch/draft to approved stage."""
     clean_id = Path(ticket_id).name.strip()
@@ -1581,7 +1558,6 @@ async def promote_ticket_endpoint(ticket_id: str, request: Request, sector: Opti
 
 
 @router.post("/api/tickets/{ticket_id}/demote")
-@router.post("/cockpit/api/tickets/{ticket_id}/demote")
 async def demote_ticket_endpoint(ticket_id: str, request: Request, sector: Optional[str] = None) -> Dict[str, Any]:
     """Demote a ticket from approved to scratch stage."""
     clean_id = Path(ticket_id).name.strip()
@@ -1597,7 +1573,6 @@ async def demote_ticket_endpoint(ticket_id: str, request: Request, sector: Optio
 
 
 @router.get("/api/tickets/{ticket_id}")
-@router.get("/cockpit/api/tickets/{ticket_id}")
 async def get_ticket_endpoint(
     ticket_id: str, request: Request, sector: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -1691,7 +1666,6 @@ async def get_ticket_endpoint(
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/gates")
-@router.get("/cockpit/api/gates")
 async def list_gates() -> List[Dict[str, Any]]:
     """Return all governance approval gates.
 
@@ -1739,7 +1713,6 @@ async def list_gates() -> List[Dict[str, Any]]:
 
 
 @router.post("/api/gates/{gate_id}/approve")
-@router.post("/cockpit/api/gates/{gate_id}/approve")
 async def approve_gate(gate_id: str, req: ApproveGateRequest, request: Request) -> Dict[str, Any]:
     """Explicit human approval of a governance gate (invokes gate_script.py decide)."""
     clean_id = gate_id.strip()
@@ -1785,7 +1758,6 @@ async def approve_gate(gate_id: str, req: ApproveGateRequest, request: Request) 
 
 
 @router.post("/api/gates/{gate_id}/reject")
-@router.post("/cockpit/api/gates/{gate_id}/reject")
 async def reject_gate(gate_id: str, req: RejectRequest, request: Request) -> Dict[str, Any]:
     """Explicit human rejection of a governance gate with mandatory reason."""
     clean_id = gate_id.strip()
@@ -1856,7 +1828,6 @@ def _mark_ticket_bridged(ticket_path: Path, capsule_id: str) -> None:
 
 
 @router.post("/api/tickets/settle")
-@router.post("/cockpit/api/tickets/settle")
 async def settle_tickets() -> Dict[str, Any]:
     """Pull approved gates across *all* domains and bridge them to the spool.
 
@@ -1941,7 +1912,6 @@ async def settle_tickets() -> Dict[str, Any]:
 
 
 @router.post("/api/pulse/run")
-@router.post("/cockpit/api/pulse/run")
 async def trigger_factory_pulse(scan: str = "incremental") -> Dict[str, Any]:
     """Execute one factory pulse pass across spool deliverables.
 
@@ -1966,7 +1936,6 @@ async def trigger_factory_pulse(scan: str = "incremental") -> Dict[str, Any]:
 
 
 @router.get("/api/queue")
-@router.get("/cockpit/api/queue")
 async def get_work_queue(
     state: str = Query("active", description="active | pending | claimed | done | failed | cancelled | all"),
     kind: Optional[str] = Query(None, description="Filter by kind (e.g. capsule.advance)"),
@@ -1991,7 +1960,6 @@ async def get_work_queue(
 
 
 @router.post("/api/queue")
-@router.post("/cockpit/api/queue")
 async def enqueue_work(body: EnqueueWorkRequest) -> Dict[str, Any]:
     """Schedule one unit of work (priority, delay, retry budget, idempotency).
 
@@ -2027,7 +1995,6 @@ async def enqueue_work(body: EnqueueWorkRequest) -> Dict[str, Any]:
 
 
 @router.post("/api/queue/drain")
-@router.post("/cockpit/api/queue/drain")
 async def drain_queued_work(limit: Optional[int] = Query(None, ge=1, le=200)) -> Dict[str, Any]:
     """Run due queue items now (``capsule.advance``) — no spool sweep.
 
@@ -2051,7 +2018,6 @@ async def drain_queued_work(limit: Optional[int] = Query(None, ge=1, le=200)) ->
 
 
 @router.post("/api/queue/{item_id}/cancel")
-@router.post("/cockpit/api/queue/{item_id}/cancel")
 async def cancel_queued_work(item_id: str) -> Dict[str, Any]:
     """Cancel a pending or claimed queue item.
 
@@ -2072,7 +2038,6 @@ async def cancel_queued_work(item_id: str) -> Dict[str, Any]:
 
 
 @router.post("/api/ideation/run")
-@router.post("/cockpit/api/ideation/run")
 async def trigger_auto_ideation() -> Dict[str, Any]:
     """Execute the auto_ideator engine to generate a high-impact idea and raise a gate."""
     auto_ideator_path = DOMAINS_DIR / "ideation" / "auto_ideator.py"
@@ -2105,7 +2070,6 @@ async def trigger_auto_ideation() -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/cadence")
-@router.get("/cockpit/api/cadence")
 async def get_cadence_status() -> Dict[str, Any]:
     """Real 48-hour cadence guard, cron heartbeat, and weekly schedule status."""
     try:
@@ -2175,7 +2139,6 @@ async def get_cadence_status() -> Dict[str, Any]:
 
 
 @router.get("/api/agents")
-@router.get("/cockpit/api/agents")
 async def list_agents() -> List[Dict[str, Any]]:
     """Directory of all AI agents in the company with real metrics and activity."""
     from workers import WORKERS, domain_workers
@@ -2342,7 +2305,6 @@ async def list_agents() -> List[Dict[str, Any]]:
 
 
 @router.get("/api/engine/gears")
-@router.get("/cockpit/api/engine/gears")
 async def get_gears_status() -> Dict[str, Any]:
     """Status and telemetry for the 5 Sovereign Engine Gears."""
     pulse_status = "healthy"
@@ -2467,7 +2429,6 @@ async def get_gears_status() -> Dict[str, Any]:
 
 
 @router.post("/api/engine/beat")
-@router.post("/cockpit/api/engine/beat")
 async def trigger_full_pulse_beat() -> Dict[str, Any]:
     """Execute the full engine beat (settle -> auto_ideator 48h guard -> dispatcher -> factory pulse)."""
     pulse_script = ENGINE_ROOT / "orchestration" / "pulse.py"
@@ -2490,7 +2451,6 @@ async def trigger_full_pulse_beat() -> Dict[str, Any]:
 
 
 @router.post("/api/tools/qa_inspect")
-@router.post("/cockpit/api/tools/qa_inspect")
 async def qa_inspect_endpoint(req: QAInspectRequest) -> Dict[str, Any]:
     """Inspect copy text for tech signals, banned buzzwords and length compliance."""
     from data.domains.marketing.gateway_ops import BANNED_BUZZWORDS, BANNED_PHRASES, TECH_SIGNALS, MIN_TECH_SIGNALS
@@ -2527,7 +2487,6 @@ async def qa_inspect_endpoint(req: QAInspectRequest) -> Dict[str, Any]:
 
 
 @router.post("/api/tools/prompt_distill")
-@router.post("/cockpit/api/tools/prompt_distill")
 async def prompt_distill_endpoint(req: PromptDistillRequest) -> Dict[str, Any]:
     """Distill copy text into an image prompt complying with the flevo aesthetic."""
     from capsule_engine import default_gateway
@@ -2547,7 +2506,6 @@ async def prompt_distill_endpoint(req: PromptDistillRequest) -> Dict[str, Any]:
 
 
 @router.post("/api/tools/test_image")
-@router.post("/cockpit/api/tools/test_image")
 async def test_image_endpoint(req: TestImageRequest) -> Dict[str, Any]:
     """Test image generation through Hugging Face FLUX.1 or Pollinations."""
     from workers.design import fetch_free_image
@@ -2575,7 +2533,6 @@ async def test_image_endpoint(req: TestImageRequest) -> Dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 @router.get("/api/sandbox/capsules")
-@router.get("/cockpit/api/sandbox/capsules")
 async def list_sandbox_capsules_endpoint() -> List[Dict[str, Any]]:
     """List all trial capsules currently held in the isolated sandbox spool."""
     from capsule_engine.sandbox import CapsuleSandbox
@@ -2584,7 +2541,6 @@ async def list_sandbox_capsules_endpoint() -> List[Dict[str, Any]]:
 
 
 @router.get("/api/sandbox/capsules/{capsule_id}")
-@router.get("/cockpit/api/sandbox/capsules/{capsule_id}")
 async def inspect_sandbox_capsule_endpoint(capsule_id: str) -> Dict[str, Any]:
     """Deep inspect a specific trial capsule, its artifacts, and audit chain."""
     from capsule_engine.sandbox import CapsuleSandbox, CapsuleNotFoundError
@@ -2598,7 +2554,6 @@ async def inspect_sandbox_capsule_endpoint(capsule_id: str) -> Dict[str, Any]:
 
 
 @router.post("/api/sandbox/trial")
-@router.post("/cockpit/api/sandbox/trial")
 async def run_sandbox_trial_endpoint(req: SandboxTrialRequest, request: Request) -> Dict[str, Any]:
     """Execute an isolated factory trial for a specific ticket in capsules_sandbox/."""
     from capsule_engine.sandbox import CapsuleSandbox, TicketNotFoundError
@@ -2621,7 +2576,6 @@ async def run_sandbox_trial_endpoint(req: SandboxTrialRequest, request: Request)
 
 
 @router.post("/api/sandbox/promote/{capsule_id}")
-@router.post("/cockpit/api/sandbox/promote/{capsule_id}")
 async def promote_sandbox_capsule_endpoint(
     capsule_id: str, request: Request, req: Optional[SandboxPromoteRequest] = None
 ) -> Dict[str, Any]:
@@ -2642,7 +2596,6 @@ async def promote_sandbox_capsule_endpoint(
 
 
 @router.post("/api/sandbox/clean")
-@router.post("/cockpit/api/sandbox/clean")
 async def clean_sandbox_endpoint(req: Optional[SandboxCleanRequest] = None) -> Dict[str, Any]:
     """Clean up trial capsules from the sandbox spool while preserving .gitkeep."""
     from capsule_engine.sandbox import CapsuleSandbox
@@ -2771,7 +2724,6 @@ def _build_capsule_entry(
 
 
 @router.get("/api/capsules")
-@router.get("/cockpit/api/capsules")
 async def list_capsules(
     request: Request = None,
     state: Optional[str] = None,
@@ -2841,7 +2793,6 @@ async def list_capsules(
 
 
 @router.get("/api/capsules/pending")
-@router.get("/cockpit/api/capsules/pending")
 async def list_pending_capsules() -> List[Dict[str, Any]]:
     """Backwards-compatible endpoint: scan spool for pending_approval deliverables with image_base64."""
     if not SPOOL_DIR.is_dir():
@@ -2902,7 +2853,6 @@ async def list_pending_capsules() -> List[Dict[str, Any]]:
 
 
 @router.get("/api/capsules/{capsule_id}/image")
-@router.get("/cockpit/api/capsules/{capsule_id}/image")
 async def get_capsule_image(capsule_id: str) -> FileResponse:
     """Serve the capsule preview image directly."""
     clean_id = Path(capsule_id).name.strip()
@@ -2917,7 +2867,6 @@ async def get_capsule_image(capsule_id: str) -> FileResponse:
 
 
 @router.get("/api/capsules/{capsule_id}")
-@router.get("/cockpit/api/capsules/{capsule_id}")
 async def get_capsule_details(capsule_id: str, request: Request) -> Dict[str, Any]:
     """Retrieve deep, comprehensive single-capsule inspection details & telemetry."""
     clean_id = Path(capsule_id).name.strip()
@@ -2998,7 +2947,6 @@ async def get_capsule_details(capsule_id: str, request: Request) -> Dict[str, An
 
 
 @router.get("/api/capsules/{capsule_id}/outputs")
-@router.get("/cockpit/api/capsules/{capsule_id}/outputs")
 async def list_capsule_outputs(capsule_id: str) -> Dict[str, Any]:
     """The capsule's typed deliverables (metadata only; fetch one for content)."""
     clean_id = Path(capsule_id).name.strip()
@@ -3013,7 +2961,6 @@ async def list_capsule_outputs(capsule_id: str) -> Dict[str, Any]:
 
 
 @router.get("/api/capsules/{capsule_id}/outputs/{output_name}")
-@router.get("/cockpit/api/capsules/{capsule_id}/outputs/{output_name}")
 async def get_capsule_output(capsule_id: str, output_name: str) -> Response:
     """Fetch one deliverable by its declared name (text inline, binary as a file)."""
     clean_id = Path(capsule_id).name.strip()
@@ -3052,7 +2999,6 @@ async def get_capsule_output(capsule_id: str, output_name: str) -> Response:
 
 
 @router.post("/api/capsules/{capsule_id}/viewed")
-@router.post("/cockpit/api/capsules/{capsule_id}/viewed")
 async def record_capsule_viewed(capsule_id: str, request: Request) -> Dict[str, Any]:
     """Record an audit trail entry for who viewed this capsule."""
     clean_id = Path(capsule_id).name.strip()
@@ -3076,7 +3022,6 @@ async def record_capsule_viewed(capsule_id: str, request: Request) -> Dict[str, 
 
 
 @router.get("/api/config/marketing")
-@router.get("/cockpit/api/config/marketing")
 async def get_marketing_config_endpoint() -> Dict[str, Any]:
     """Retrieve dynamic white-label marketing and cadence configuration."""
     from data.domains.marketing.marketing_config import load_marketing_config
@@ -3084,7 +3029,6 @@ async def get_marketing_config_endpoint() -> Dict[str, Any]:
 
 
 @router.post("/api/config/marketing")
-@router.post("/cockpit/api/config/marketing")
 async def update_marketing_config_endpoint(req: Request) -> Dict[str, Any]:
     """Update dynamic white-label marketing and cadence configuration."""
     from data.domains.marketing.marketing_config import (
@@ -3109,9 +3053,7 @@ async def update_marketing_config_endpoint(req: Request) -> Dict[str, Any]:
 
 
 @router.get("/api/config/brand")
-@router.get("/cockpit/api/config/brand")
 @router.get("/api/config/company")
-@router.get("/cockpit/api/config/company")
 async def get_brand_config_endpoint() -> Dict[str, Any]:
     """Retrieve dynamic white-label brand guidelines and company context."""
     from shared_kernel.brand_profile import load_company_profile
@@ -3119,7 +3061,6 @@ async def get_brand_config_endpoint() -> Dict[str, Any]:
 
 
 @router.get("/api/config/company/schema")
-@router.get("/cockpit/api/config/company/schema")
 async def get_company_schema_endpoint() -> Dict[str, Any]:
     """Retrieve the pristine unpopulated company profile schema."""
     from shared_kernel.brand_profile import DEFAULT_PROFILE
@@ -3128,12 +3069,8 @@ async def get_company_schema_endpoint() -> Dict[str, Any]:
 
 @router.post("/api/config/brand")
 @router.patch("/api/config/brand")
-@router.post("/cockpit/api/config/brand")
-@router.patch("/cockpit/api/config/brand")
 @router.post("/api/config/company")
 @router.patch("/api/config/company")
-@router.post("/cockpit/api/config/company")
-@router.patch("/cockpit/api/config/company")
 async def update_brand_config_endpoint(req: Request) -> Dict[str, Any]:
     """Dynamically update white-label company profile and brand settings at runtime."""
     import copy
@@ -3160,7 +3097,6 @@ async def update_brand_config_endpoint(req: Request) -> Dict[str, Any]:
 
 
 @router.post("/api/capsules/{capsule_id}/approve")
-@router.post("/cockpit/api/capsules/{capsule_id}/approve")
 async def approve_capsule(capsule_id: str, request: Request) -> Dict[str, Any]:
     """Approve a deliverable, enforcing TOCTOU cryptographic integrity.
 
@@ -3245,7 +3181,6 @@ async def approve_capsule(capsule_id: str, request: Request) -> Dict[str, Any]:
 
 
 @router.post("/api/capsules/{capsule_id}/reject")
-@router.post("/cockpit/api/capsules/{capsule_id}/reject")
 async def reject_capsule(capsule_id: str, req: RejectRequest, request: Request) -> Dict[str, Any]:
     """Reject a deliverable and transition to needs_revision with reason.
 
@@ -3307,7 +3242,6 @@ async def reject_capsule(capsule_id: str, req: RejectRequest, request: Request) 
 
 
 @router.post("/api/capsules")
-@router.post("/cockpit/api/capsules")
 async def create_capsule_endpoint(req: CreateCapsuleRequest, request: Request) -> Dict[str, Any]:
     """Create a new capsule in the spool, seated at the approval gate.
 
@@ -3430,7 +3364,6 @@ async def create_capsule_endpoint(req: CreateCapsuleRequest, request: Request) -
 
 
 @router.post("/api/capsules/build_post")
-@router.post("/cockpit/api/capsules/build_post")
 async def build_post_endpoint(req: PostBuildRequest) -> Dict[str, Any]:
     """Create atomic tickets T1, T2, T3 and assemble a real Deliverable Capsule manifest on disk."""
     from data.domains.marketing.post_builder import (
@@ -4145,7 +4078,6 @@ def _spool_manifests() -> List[Path]:
 
 
 @router.get("/api/tasks/in-flight")
-@router.get("/cockpit/api/tasks/in-flight")
 async def list_in_flight_tasks(limit: int = 100) -> Dict[str, Any]:
     """Live in-flight telemetry for the web cockpit and the Flutter app.
 
@@ -4226,7 +4158,6 @@ def _ticket_radar_row(
 
 
 @router.get("/api/radar/tasks")
-@router.get("/cockpit/api/radar/tasks")
 async def executive_radar_tasks(limit: int = 200, offset: int = 0) -> Dict[str, Any]:
     """Brick: executive radar matrix — task identity, gates, tokens and cost.
 
@@ -4359,7 +4290,6 @@ async def executive_radar_tasks(limit: int = 200, offset: int = 0) -> Dict[str, 
 
 
 @router.get("/api/capsules/{capsule_id}/gates")
-@router.get("/cockpit/api/capsules/{capsule_id}/gates")
 async def get_capsule_gates(
     capsule_id: str,
     open_active: bool = Query(
@@ -4415,7 +4345,6 @@ async def get_capsule_gates(
 
 
 @router.post("/api/capsules/{capsule_id}/gates/{gate_id}/open")
-@router.post("/cockpit/api/capsules/{capsule_id}/gates/{gate_id}/open")
 async def open_capsule_gate(
     capsule_id: str, gate_id: str, request: Request
 ) -> Dict[str, Any]:
@@ -4454,7 +4383,6 @@ async def open_capsule_gate(
 
 
 @router.post("/api/capsules/{capsule_id}/gates/{gate_id}/decision")
-@router.post("/cockpit/api/capsules/{capsule_id}/gates/{gate_id}/decision")
 async def decide_capsule_gate(
     capsule_id: str, gate_id: str, req: GateDecisionRequest, request: Request
 ) -> Dict[str, Any]:
@@ -4566,7 +4494,6 @@ async def decide_capsule_gate(
 
 
 @router.get("/api/capsules/{capsule_id}/trace")
-@router.get("/cockpit/api/capsules/{capsule_id}/trace")
 async def get_capsule_trace(capsule_id: str, limit: int = 200) -> Dict[str, Any]:
     """The capsule's immutable execution trace + rolled-up accounting."""
     from capsule_engine import trace as trace_engine
@@ -4592,7 +4519,6 @@ async def get_capsule_trace(capsule_id: str, limit: int = 200) -> Dict[str, Any]
 
 
 @router.get("/api/memory/feedback")
-@router.get("/cockpit/api/memory/feedback")
 async def list_feedback_ledger(
     domain: Optional[str] = None,
     decision: Optional[str] = None,
@@ -4689,7 +4615,6 @@ def _preview_file_block(
 
 
 @router.get("/api/capsules/{capsule_id}/preview")
-@router.get("/cockpit/api/capsules/{capsule_id}/preview")
 async def preview_capsule_delivery(
     capsule_id: str, include_images: bool = True
 ) -> Dict[str, Any]:
