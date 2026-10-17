@@ -44,9 +44,11 @@ from capsule_engine.router import (  # noqa: E402
     Action,
     CapsuleRouter,
 )
+from capsule_engine.worker import BaseWorker  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from orchestration import access_control, api  # noqa: E402
 from orchestration import copy_signoff  # noqa: E402
+from orchestration.capsule_pulse import run_pulse  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from workers.qa import QAWorker  # noqa: E402
 
@@ -635,6 +637,111 @@ class TheServiceCarriesTheDecisionTests(unittest.TestCase):
             "boundary; route it through orchestration.copy_signoff or pin it "
             "here on purpose",
         )
+
+
+class _DesignSpy(BaseWorker):
+    """The design stage, watched: did the pulse ever get here?"""
+
+    name = "design"
+    handles = frozenset({State.PENDING_DESIGN})
+
+    def __init__(self) -> None:
+        self.ran = 0
+
+    def execute(self, capsule_path: str, manifest: dict) -> dict:
+        self.ran += 1
+        return manifest
+
+
+class ThePipelineCannotSkipTheReaderTests(unittest.TestCase):
+    """The hold, enforced by the pass the server actually runs.
+
+    The router unit proves the decision in isolation; this drives the real
+    ``run_pulse`` — the same entry point the 120-second service calls — over a
+    capsule parked with a sign-off owed, and proves the design stage is not
+    reached. Then it proves the answer is what releases it.
+    """
+
+    def setUp(self) -> None:
+        # A spool of this test's own: the shared one is walked by the whole
+        # suite, and a pulse that reached someone else's capsule would be a
+        # test's side effect leaking into another's.
+        self._spool = VAULT / "copy_signoff_spool"
+        shutil.rmtree(self._spool, ignore_errors=True)
+        self._spool.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self._spool, ignore_errors=True)
+        _restore_engine_config()
+
+    def _parked(
+        self,
+        capsule_id: str,
+        *,
+        domain: str = "marketing",
+        awaiting: bool = True,
+    ) -> Path:
+        """A capsule at ``pending_design``, as QA leaves it."""
+        metadata: dict = {}
+        if awaiting:
+            metadata["copy_signoff"] = {
+                "decision": "awaiting",
+                "requested_at": "2026-10-17T00:00:00+00:00",
+                "requested_by": "qa",
+                "copy_sha256": hashlib.sha256(
+                    COPY_TEXT.encode("utf-8")
+                ).hexdigest(),
+            }
+        manifest = _manifest(
+            capsule_id, State.PENDING_DESIGN, domain=domain, metadata=metadata
+        )
+        capsule_dir = self._spool / capsule_id
+        capsule_dir.mkdir(parents=True, exist_ok=True)
+        (capsule_dir / COPY_FILE).write_text(COPY_TEXT, encoding="utf-8")
+        save_manifest(capsule_dir, manifest)
+        return capsule_dir
+
+    def _pulse(self, spy: _DesignSpy) -> dict:
+        return run_pulse(
+            self._spool,
+            workers={"design": lambda: spy},
+            max_transitions=1,
+            drain=False,
+        )
+
+    def test_the_pulse_leaves_an_owed_sign_off_exactly_where_it_is(self) -> None:
+        _write_policy(enabled=True, domains=["marketing"])
+        capsule_dir = self._parked("cap_hold_pulse")
+        spy = _DesignSpy()
+
+        self._pulse(spy)
+
+        self.assertEqual(spy.ran, 0, "the design stage ran without the reader")
+        self.assertEqual(
+            load_manifest(capsule_dir)["state"], State.PENDING_DESIGN.value
+        )
+
+    def test_the_answer_is_what_releases_the_pipeline(self) -> None:
+        _write_policy(enabled=True, domains=["marketing"])
+        capsule_dir = self._parked("cap_hold_released")
+        spy = _DesignSpy()
+
+        self._pulse(spy)
+        self.assertEqual(spy.ran, 0)
+
+        copy_signoff.apply(capsule_dir, decision="approved", reviewer="abdallah")
+        self._pulse(spy)
+
+        self.assertEqual(spy.ran, 1)
+
+    def test_a_domain_that_asks_for_nothing_is_never_held(self) -> None:
+        _write_policy(enabled=True, domains=["marketing"])
+        self._parked("cap_hold_other_domain", domain="design", awaiting=False)
+        spy = _DesignSpy()
+
+        self._pulse(spy)
+
+        self.assertEqual(spy.ran, 1)
 
 
 if __name__ == "__main__":
