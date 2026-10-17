@@ -104,6 +104,23 @@ ONE_AUTOMATED_GATE = (
     {"gate_type": "qa_review", "name": "Automated QA", "targets": ("copy.md",)},
 )
 
+#: Two consecutive HUMAN gates — the shape the marketing template ships (lead
+#: sign-off, then the optional sovereign sign-off). The gate runner stops at
+#: the first one, so the second becomes active without ever being opened.
+TWO_HUMAN_GATES = (
+    {
+        "gate_type": "domain_lead_approval",
+        "name": "Lead Gate",
+        "authority": "capsule:approve",
+    },
+    {
+        "gate_type": "sovereign_root_approval",
+        "name": "Root Gate",
+        "authority": "capsule:approve",
+        "required": False,
+    },
+)
+
 #: copy.md content the automated QA evaluator passes deterministically:
 #: at least 40 characters, no placeholders, no banned vocabulary.
 QA_PASSING_TEXT = (
@@ -752,6 +769,71 @@ class GateRunnerFinishPlanSeatsInReview(unittest.TestCase):
         self.assertEqual(seat.get("to_state"), "pending_approval")
         self.assertIn("gate-runner", seat.get("by", ""))
         self.assertTrue(verify_chain(manifest["history"]).ok)
+
+
+class AHumanGateIsOpenedBeforeItCanBeSigned(unittest.TestCase):
+    """Two consecutive human gates used to deadlock the plan.
+
+    The gate runner opens each gate as it reaches it and stops at the first
+    human one. A human gate that *follows* another human gate therefore became
+    active without ever being opened: the router held the capsule (rightly),
+    nothing bound the gate's artifacts, and ``decide(approve)`` then refused
+    with "gate has not been opened yet" — forever. The optional sovereign
+    sign-off in the marketing template was unreachable, and the plan with it,
+    so no marketing capsule could ever reach ``approved``.
+    """
+
+    def test_the_router_routes_the_runner_to_open_an_unopened_human_gate(self):
+        from capsule_engine.router import Action, CapsuleRouter, GATE_RUNNER_WORKER
+
+        capsule_id = "cap_two_human_gates"
+        self.addCleanup(_rm, capsule_id)
+        _create(capsule_id)
+        _replace_plan(capsule_id, TWO_HUMAN_GATES)
+        _set_state(capsule_id, State.PENDING_APPROVAL.value)
+        _pass_active(capsule_id)  # the lead signs first
+
+        path = SPOOL / capsule_id
+        active = gate_engine.active_record(
+            gate_engine.load_records(load_manifest(path))
+        )
+        self.assertEqual(active.gate_type, "sovereign_root_approval")
+        self.assertIsNone(active.opened_at)
+
+        decision = CapsuleRouter().route(path)
+
+        self.assertEqual(decision.action, Action.EXECUTE)
+        self.assertEqual(decision.worker, GATE_RUNNER_WORKER)
+        self.assertIn("opening human gate", decision.reason or "")
+
+    def test_the_runner_opens_it_and_then_it_is_a_plain_wait(self):
+        from capsule_engine.router import Action, CapsuleRouter
+        from workers.gate_runner import GateRunnerWorker
+
+        capsule_id = "cap_two_human_gates_run"
+        self.addCleanup(_rm, capsule_id)
+        _create(capsule_id)
+        _replace_plan(capsule_id, TWO_HUMAN_GATES)
+        _set_state(capsule_id, State.PENDING_APPROVAL.value)
+        _pass_active(capsule_id)
+
+        path = SPOOL / capsule_id
+        GateRunnerWorker().run(str(path))
+
+        manifest = load_manifest(path)
+        active = gate_engine.active_record(gate_engine.load_records(manifest))
+        self.assertTrue(active.opened_at, "the runner must open the human gate")
+        self.assertTrue(active.artifacts, "opening binds the primary artifact")
+
+        # from here it is a normal wait, not a deadlock
+        self.assertEqual(CapsuleRouter().route(path).action, Action.HOLD)
+
+        result = _decide(capsule_id, "approve", gate_id=active.gate_id)
+        self.assertEqual(result["decision"], "approve")
+        self.assertTrue(result["gates"]["complete"])
+        self.assertEqual(
+            load_manifest(path)["state"], State.PENDING_APPROVAL.value
+        )
 
 
 class ApprovalBoundaryGuardsEverySource(unittest.TestCase):

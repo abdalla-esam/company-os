@@ -513,7 +513,8 @@ class CapsuleRouter:
           never re-written by the router (which stays read-only);
         - an **automated** active gate is executed by the ``gate-runner``;
         - a **human** active gate is a HOLD naming the gate and the capability
-          its decision demands;
+          its decision demands — after one runner pass has opened it, since a
+          signature needs bound artifacts (an unopened gate refuses approval);
         - a **complete** plan returns ``None`` so the caller's legacy logic
           decides (governor / manager / transition into the approval gate when
           the capsule is still ``in_review``);
@@ -574,6 +575,22 @@ class CapsuleRouter:
                 reason=(
                     f"gate plan: evaluating {active.gate_id} "
                     f"({active.gate_type}) — {checklist}"
+                ),
+            )
+        if not active.opened_at:
+            # The runner opens each gate and stops at the first human one, so a
+            # human gate that follows another human gate becomes active without
+            # ever being opened. Holding it there deadlocks the plan: approving
+            # it needs bound artifacts (the TOCTOU guard refuses an unopened
+            # gate), and nothing else ever binds them. Route the runner once to
+            # open it; the next pulse holds on it as usual.
+            return RouteDecision(
+                **base,
+                action=Action.EXECUTE,
+                worker=GATE_RUNNER_WORKER,
+                reason=(
+                    f"gate plan: opening human gate {active.gate_id} "
+                    f"({active.gate_type}) for review — {checklist}"
                 ),
             )
         return RouteDecision(
