@@ -248,6 +248,16 @@ Strict prohibitions:
 - Do NOT write the entire final post. Output only the structured brief below.
 - Strictly avoid duplicating any topic listed in the historical memory context.
 {company_block}
+Language:
+- Write every value a person reads — [Proposed Title], [Strategic Angle], each
+  [Core Takeaways] line, and [Leadership CTA] — in Arabic. The owner who
+  approves this proposal reads Arabic, and an English proposal is a proposal
+  they cannot judge.
+- Keep the bracketed labels exactly as they are, and keep the two values the
+  system reads as they are: [Target Platform] (linkedin / facebook) and
+  [Post Type] (weekly_routine).
+- Brand, product and platform names stay in their own language.
+
 Required Output Format:
 [Proposed Title]: ...
 [Strategic Angle]: ...
@@ -259,6 +269,10 @@ Required Output Format:
 - ...
 [Leadership CTA]: ...
 """
+
+#: Used when the model output carries no recognizable title line. Arabic for the
+#: same reason the prompt asks for Arabic: the operator reads the proposal.
+DEFAULT_IDEA_TOPIC = "فكرة محتوى مقترحة"
 
 #: Used when the deployment has no company profile: enough to keep the ideator
 #: talking about a software business instead of about itself.
@@ -337,12 +351,13 @@ def generate_single_idea(recent_topics: List[str]) -> str:
     """
     past_topics_formatted = "\n".join(f"- {t}" for t in recent_topics[:8]) if recent_topics else "No previous topics."
 
-    user_prompt = f"""Please generate exactly one new strategic post idea proposal today.
+    user_prompt = f"""Propose exactly one new post idea for today, written in Arabic.
 
 [Historical Company Memory Context — Do Not Duplicate]:
 {past_topics_formatted}
 
-Craft an inspiring, architecturally mature, and high-authority executive idea."""
+It must be one practical tip a business owner can act on today, in the plain
+words one owner uses with another — not an executive brief."""
 
     manifest_context = {
         "domain": "ideation",
@@ -380,7 +395,7 @@ def save_idea_as_gated_ticket(idea_text: str) -> Dict[str, Any]:
 
     # Extract clean topic title from the generated idea
     lines = [line.strip() for line in idea_text.split("\n") if line.strip()]
-    topic = "Strategic Leadership Idea Proposal"
+    topic = DEFAULT_IDEA_TOPIC
     for line in lines:
         if line.startswith(("[العنوان المقترح]:", "[Proposed Title]:", "[Title]:")):
             topic = re.sub(r"^\[.*?\]:\s*", "", line).strip()

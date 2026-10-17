@@ -18,6 +18,7 @@ from tests import _bootstrap  # noqa: F401  — isolated vault before engine imp
 
 import json
 import os
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -173,6 +174,42 @@ class TheIdeatorSpeaksForTheCompany(unittest.TestCase):
             self.assertIn(pillar["platform"], ("linkedin", "facebook"))
             self.assertGreaterEqual(len(pillar["takeaways"]), 3)
             self.assertTrue(pillar["cta"].strip())
+
+    def test_the_ideator_asks_for_an_arabic_proposal(self):
+        """The owner reads the proposal, and the owner reads Arabic.
+
+        The first live proposal came back in English because the prompt named a
+        language nowhere: the owner approved it and then said the idea was in
+        English. The rule is stated for the values they read and withheld from
+        the two values the system parses.
+        """
+        prompt = auto_ideator.build_ideator_system_prompt()
+        # The company profile block carries its own "Language:" line, so the
+        # rule is located by its own words, not by the heading.
+        language = prompt.split("Write every value a person reads", 1)[1]
+        language = language.split("Required Output Format:", 1)[0]
+
+        self.assertIn("in Arabic", language)
+        for read_by_a_person in (
+            "[Proposed Title]",
+            "[Strategic Angle]",
+            "[Core Takeaways]",
+            "[Leadership CTA]",
+        ):
+            self.assertIn(read_by_a_person, language)
+
+        # The machine-read values keep their own tokens: the platform decides
+        # where the post goes, and the post type is a routing key.
+        self.assertIn("linkedin", language)
+        self.assertIn("weekly_routine", language)
+
+    def test_the_offline_default_topic_is_arabic(self):
+        """The last line of the offline path is Arabic for the same reason."""
+        self.assertTrue(auto_ideator.DEFAULT_IDEA_TOPIC.strip())
+        self.assertIsNone(
+            re.search(r"[A-Za-z]", auto_ideator.DEFAULT_IDEA_TOPIC),
+            "the fallback topic is read by the owner, who reads Arabic",
+        )
 
 
 class TheReviewerJudgesInTheCompanysVoice(unittest.TestCase):
