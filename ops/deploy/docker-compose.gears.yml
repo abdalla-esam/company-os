@@ -12,7 +12,7 @@ services:
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=production
-      - WEBHOOK_URL=http://127.0.0.1:5678/
+      - N8N_WEBHOOK_URL=http://127.0.0.1:5678/
       - GENERIC_TIMEZONE=Africa/Cairo
       # Pinned, not auto-generated: n8n invents one on first boot and stores it
       # in the volume, so a recreated volume silently orphans every credential
@@ -21,6 +21,13 @@ services:
       # The Tool Bridge bearer token, so the workflow verifies its caller
       # instead of assuming anything on loopback is the engine.
       - AGENCY_BRIDGE_TOKEN=${AGENCY_BRIDGE_TOKEN:?set AGENCY_BRIDGE_TOKEN in .env}
+      # n8n 2.43 denies $env inside a Code node by default, and this container
+      # needs exactly one variable: the same AGENCY_BRIDGE_TOKEN it already
+      # holds in its environment. Withholding it from the node reads as
+      # defence but protects nothing the process cannot already read, and the
+      # alternative — echoing any bearer it is handed — would let any local
+      # process trigger a publish. Allow it, deliberately and visibly.
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       # The editor is served over plain http on loopback, so a Secure cookie
       # would never come back and the login would loop forever.
       - N8N_SECURE_COOKIE=false
