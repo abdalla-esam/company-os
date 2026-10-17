@@ -54,6 +54,7 @@ from orchestration.v1 import scope as v1_scope
 from shared_kernel import users
 from starlette.requests import Request
 from starlette.testclient import TestClient
+from tests.live_routes import iter_live_routes
 
 #: A test-only signing secret (>= the 32-byte minimum mint_key enforces).
 TEST_SECRET = "slicer-test-signing-secret-0123456789abcdef"
@@ -296,13 +297,11 @@ class ReadScopingTestCase(SecretOnlyTestCase):
     # ---- helpers ---------------------------------------------------------- #
 
     def _live_v1_get_routes(self) -> set:
-        found = set()
-        for route in api.app.routes:
-            path = getattr(route, "path", "") or ""
-            methods = getattr(route, "methods", None) or set()
-            if path.startswith("/v1/") and "GET" in methods:
-                found.add(("GET", path))
-        return found
+        return {
+            ("GET", path)
+            for path, methods in iter_live_routes()
+            if path.startswith("/v1/") and "GET" in methods
+        }
 
 
 # --------------------------------------------------------------------------- #

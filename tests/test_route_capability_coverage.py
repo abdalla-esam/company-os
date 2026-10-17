@@ -9,8 +9,9 @@ capability entry and nothing failed. The namespace the mobile contract
 (``/v1/``) was about to be built under was not guarded at all, which is the same
 bug at a larger scale.
 
-This module reads the real FastAPI ``app.routes`` (never a hand-written list)
-and enforces four invariants:
+This module reads the real FastAPI route table (never a hand-written list, and
+through :mod:`tests.live_routes` so a lazily-included router still shows up) and
+enforces four invariants:
 
 1. **Coverage** — every guarded live route is either DECLARED in the map or an
    explicit ``PUBLIC_API_PATHS`` exception. Nothing else may be reachable.
@@ -37,7 +38,8 @@ from tests import _bootstrap  # noqa: F401  — isolated vault before any engine
 import unittest
 from typing import Dict, Set, Tuple
 
-from orchestration import access_control, api
+from orchestration import access_control
+from tests.live_routes import live_route_keys  # noqa: E402
 
 RouteKey = Tuple[str, str]
 
@@ -45,22 +47,12 @@ RouteKey = Tuple[str, str]
 def _live_routes() -> Set[RouteKey]:
     """Every ``(METHOD, path)`` the live FastAPI app really serves.
 
-    Duck-typed on purpose: the app mixes ``fastapi.routing.APIRoute`` (its own
-    handlers) with ``starlette.routing.Route`` (the generated ``/docs``,
-    ``/redoc``, ``/openapi.json``) and ``Mount`` objects for static files, which
-    carry a path but no method vocabulary. ``HEAD`` folds onto ``GET`` through
-    the policy module's own normalizer, so this set and ``resolve()`` can never
-    disagree about what a method is called.
+    The walk itself lives in :mod:`tests.live_routes`, which sees through the
+    lazy ``_IncludedRouter`` entry FastAPI 0.143 appends instead of copying an
+    included router's routes — without that, this table collapses to a handful
+    of entries and every assertion below goes quietly vacuous.
     """
-    pairs: Set[RouteKey] = set()
-    for route in api.app.routes:
-        path = getattr(route, "path", None)
-        methods = getattr(route, "methods", None)
-        if not isinstance(path, str) or not path or not methods:
-            continue
-        for method in methods:
-            pairs.add((access_control._normalize_method(method), path))
-    return pairs
+    return live_route_keys()
 
 
 def _uncovered_guarded_routes() -> Set[RouteKey]:
