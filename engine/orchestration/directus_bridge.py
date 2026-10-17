@@ -71,6 +71,24 @@ DIRECTUS_SERVICE = "directus-api"
 DIRECTUS_PROVIDER = "directus"
 DIRECTUS_DOMAIN = "operations"
 
+#: The sweep is OFF unless a deployment opts in. A Directus that is not
+#: running would otherwise be dialled on *every* beat: the logins are metered
+#: into ``data/finance/usage_ledger.jsonl``, so one dead service buries the
+#: day's real spend evidence under hundreds of failed rows. ``1`` / ``true`` /
+#: ``yes`` / ``on`` (case-insensitive, trimmed) enables it again for a host
+#: that really serves Directus.
+ENABLED_ENV = "AGENCY_DIRECTUS_ENABLED"
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+
+
+def directus_enabled() -> bool:
+    """True only when the deployment explicitly turned the Directus step on.
+
+    Unset — the shipped default — means off, so a host that never installed
+    Directus is silent instead of failing loudly on a schedule.
+    """
+    return os.getenv(ENABLED_ENV, "").strip().lower() in _TRUTHY
+
 
 class _MeteredCall:
     """authorize() before the HTTP request, record() after it — one call.
@@ -338,6 +356,13 @@ def sync_directus_cycle() -> dict[str, int]:
 
 
 if __name__ == "__main__":
+    # The switch lives on the module that opens the socket, so the beat, a
+    # cron line, and a human running this file by hand all obey the same answer.
+    if not directus_enabled():
+        logger.info(
+            "Directus bridge disabled (%s is off) — skipping sweep", ENABLED_ENV
+        )
+        raise SystemExit(0)
     logger.info("Running Directus sync sweep...")
     res = sync_directus_cycle()
     logger.info("Sweep finished: %s", res)
