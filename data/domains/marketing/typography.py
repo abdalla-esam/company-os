@@ -283,3 +283,122 @@ def overlay_arabic_banner(
     except Exception:
         # Absolute Fail-Safe: Never crash, return original image
         return image_bytes, False
+
+
+#: Share of the image height the brand bar takes. At the 768px the keyless
+#: provider returns, this is ~58px: enough to cover the name it stamps into the
+#: bottom-right corner, and still a footer rather than a crop.
+BRAND_BAR_RATIO = 0.075
+
+#: The banner's own palette, so the bar reads as part of the same design.
+BRAND_BAR_BG = (8, 14, 24)
+BRAND_BAR_ACCENT = (0, 215, 255)
+BRAND_BAR_TEXT = (255, 255, 255)
+
+
+def overlay_brand_bar(
+    image_bytes: bytes,
+    brand_name: Optional[str] = None,
+    website: Optional[str] = None,
+    height_ratio: float = BRAND_BAR_RATIO,
+) -> tuple[bytes, bool]:
+    """Draw the company's own bar across the foot of the image.
+
+    The keyless image provider stamps its own name into the bottom-right corner
+    of everything it hands back. This covers that strip with the company's mark
+    — the same place, the company's name — and leaves the picture above it
+    alone.
+
+    It draws no Arabic, so it must *not* inherit :data:`PIL_AVAILABLE`: that
+    flag also requires ``arabic_reshaper``/``bidi``, which the production venv
+    does not have, which is why the Arabic banner has never rendered an image
+    there. Pillow alone is enough here, and everything else fails safe.
+
+    Args:
+        image_bytes: the (already optimized) image payload.
+        brand_name: the wordmark; read from ``config/company_profile.json`` when
+            omitted, so a rebrand reaches the image without touching code.
+        website: the address shown beside the wordmark; same profile source.
+        height_ratio: bar height as a share of the image height.
+
+    Returns:
+        ``(result_bytes, applied)``. Without Pillow, with nothing to write, or
+        on any rendering error: the input bytes untouched and ``False``.
+    """
+    if brand_name is None or website is None:
+        try:
+            from shared_kernel.brand_profile import load_company_profile
+
+            profile = load_company_profile()
+        except Exception:
+            profile = {}
+        if brand_name is None:
+            brand_name = str(
+                profile.get("brand_name") or profile.get("company_name") or ""
+            ).strip()
+        if website is None:
+            website = str(profile.get("website") or "").strip()
+
+    if not brand_name and not website:
+        return image_bytes, False
+
+    try:
+        from PIL import Image, ImageDraw
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        draw = ImageDraw.Draw(img)
+        width, height = img.size
+
+        bar_h = max(28, int(height * height_ratio))
+        top = height - bar_h
+        draw.rectangle([(0, top), (width, height)], fill=BRAND_BAR_BG)
+        draw.rectangle([(0, top), (width, top + 3)], fill=BRAND_BAR_ACCENT)
+
+        pad = max(14, int(width * 0.025))
+        font_brand = find_font(LATIN_FONTS, size=max(13, int(bar_h * 0.52)))
+        font_site = find_font(LATIN_FONTS, size=max(11, int(bar_h * 0.36)))
+
+        brand_box = (
+            draw.textbbox((0, 0), brand_name, font=font_brand) if brand_name else None
+        )
+        site_box = (
+            draw.textbbox((0, 0), website, font=font_site) if website else None
+        )
+        brand_w = (brand_box[2] - brand_box[0]) if brand_box else 0
+        site_w = (site_box[2] - site_box[0]) if site_box else 0
+
+        # The wordmark centres in the space the address leaves. If the two would
+        # touch, the address is dropped rather than overlapped: the name is the
+        # part that has to survive.
+        site_x = width - site_w - pad
+        brand_x = (width - brand_w) // 2
+        if website and (brand_x + brand_w + pad > site_x):
+            website, site_box, site_w = "", None, 0
+            site_x = width - pad
+            brand_x = (width - brand_w) // 2
+
+        if brand_name and brand_box:
+            ink_h = brand_box[3] - brand_box[1]
+            draw.text(
+                (brand_x, top + (bar_h - ink_h) // 2 - brand_box[1]),
+                brand_name,
+                font=font_brand,
+                fill=BRAND_BAR_TEXT,
+            )
+        if website and site_box:
+            ink_h = site_box[3] - site_box[1]
+            draw.text(
+                (site_x, top + (bar_h - ink_h) // 2 - site_box[1]),
+                website,
+                font=font_site,
+                fill=BRAND_BAR_ACCENT,
+            )
+
+        out_buf = io.BytesIO()
+        img.save(out_buf, format="JPEG", quality=90, optimize=True, progressive=True)
+        return out_buf.getvalue(), True
+
+    except Exception:
+        # The banner's contract, for the same reason: a decoration never breaks
+        # a pipeline.
+        return image_bytes, False

@@ -23,6 +23,7 @@ All fixtures live in the shared bootstrap vault and are removed in
 from tests import _bootstrap  # noqa: F401  — isolated vault before engine imports
 
 import asyncio
+import contextlib
 import importlib
 import io
 import json
@@ -99,6 +100,38 @@ def _write_surface_capsule() -> None:
         json.dumps(_manifest(NO_IMAGE_ID, "draft")), encoding="utf-8"
     )
     (no_image / "copy.md").write_text(SURFACE_COPY, encoding="utf-8")
+
+
+@contextlib.contextmanager
+def _profile(document: dict):
+    """Point the company-profile loader at a temporary document."""
+    handle, path = tempfile.mkstemp(prefix="company_profile_", suffix=".json")
+    try:
+        Path(path).write_text(
+            json.dumps(document, ensure_ascii=False), encoding="utf-8"
+        )
+        previous = os.environ.get("COMPANY_PROFILE_PATH")
+        os.environ["COMPANY_PROFILE_PATH"] = path
+        try:
+            yield path
+        finally:
+            if previous is None:
+                os.environ.pop("COMPANY_PROFILE_PATH", None)
+            else:
+                os.environ["COMPANY_PROFILE_PATH"] = previous
+    finally:
+        os.close(handle)
+        Path(path).unlink(missing_ok=True)
+
+
+def _has_pillow() -> bool:
+    """Whether Pillow — and only Pillow — is importable in this interpreter."""
+    try:
+        import PIL  # noqa: F401
+
+        return True
+    except Exception:
+        return False
 
 
 def _write_design_capsule() -> Path:
@@ -352,6 +385,124 @@ class TypographyAndDesignPath(unittest.TestCase):
         else:  # pragma: no cover - pillow is a declared requirement
             self.assertFalse(applied)
             self.assertEqual(output, image)
+
+    def test_brand_bar_covers_the_foot_of_the_image(self):
+        """The strip the free provider stamps is the company's strip afterwards."""
+        module = self._typography()
+        if not _has_pillow():
+            self.skipTest("pillow unavailable; the bar is a no-op")
+        from PIL import Image
+
+        image = _image_bytes()
+        output, applied = module.overlay_brand_bar(image, "Fllevo", "https://fllevo.dev")
+        self.assertTrue(applied)
+        self.assertNotEqual(output, image)
+
+        shot = Image.open(io.BytesIO(output)).convert("RGB")
+        width, height = shot.size
+        before = Image.open(io.BytesIO(image)).convert("RGB")
+        # The bottom-right corner is where a provider watermark sits; it is the
+        # bar's colour now, not the photograph's.
+        corner = shot.getpixel((width - 4, height - 4))
+        self.assertLess(sum(corner), sum(before.getpixel((width - 4, height - 4))))
+
+    def test_brand_bar_does_not_wait_on_the_arabic_stack(self):
+        """The bar draws no Arabic, so it must not inherit ``PIL_AVAILABLE``.
+
+        That flag also requires ``arabic_reshaper``/``bidi``, which the
+        production venv has neither of — so the banner it guards has never
+        rendered an image there, silently, by its own fail-safe. This bar is
+        what covers the provider's stamp, so Pillow alone has to be enough.
+        """
+        module = self._typography()
+        if not _has_pillow():
+            self.skipTest("pillow unavailable; the bar is a no-op")
+        image = _image_bytes()
+        was = module.PIL_AVAILABLE
+        module.PIL_AVAILABLE = False
+        try:
+            output, applied = module.overlay_brand_bar(
+                image, "Fllevo", "https://fllevo.dev"
+            )
+        finally:
+            module.PIL_AVAILABLE = was
+        self.assertTrue(applied)
+        self.assertNotEqual(output, image)
+
+    def test_brand_bar_takes_its_words_from_the_company_profile(self):
+        """A rebrand has to reach the image without anyone touching code."""
+        module = self._typography()
+        if not _has_pillow():
+            self.skipTest("pillow unavailable; the bar is a no-op")
+        image = _image_bytes()
+        document = {
+            "schema_version": 1,
+            "company_name": "Acme",
+            "brand_name": "Acme",
+            "website": "https://acme.example",
+        }
+        with _profile(document):
+            from_profile, applied = module.overlay_brand_bar(image)
+        explicit, applied_explicit = module.overlay_brand_bar(
+            image, "Acme", "https://acme.example"
+        )
+        self.assertTrue(applied)
+        self.assertTrue(applied_explicit)
+        # Same bytes means the profile supplied exactly those two words.
+        self.assertEqual(from_profile, explicit)
+
+    def test_brand_bar_fails_safe(self):
+        module = self._typography()
+        # A payload that is not a readable image comes back untouched.
+        stub = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+        output, applied = module.overlay_brand_bar(stub, "Fllevo", "https://fllevo.dev")
+        self.assertEqual(output, stub)
+        self.assertFalse(applied)
+        # And with nothing to write, the image is left exactly as it came.
+        image = _image_bytes()
+        output, applied = module.overlay_brand_bar(image, "", "")
+        self.assertEqual(output, image)
+        self.assertFalse(applied)
+
+    def test_design_stage_applies_the_brand_bar(self):
+        module = self._typography()
+        if not _has_pillow():
+            self.skipTest("pillow unavailable; the bar is a no-op")
+        from capsule_engine.gateway import OfflineModelGateway
+        from workers.design import DesignWorker
+
+        capsule = _write_design_capsule()
+        manifest = json.loads(
+            (capsule / "manifest.json").read_text(encoding="utf-8")
+        )
+        real = module.overlay_brand_bar
+        seen: list[tuple] = []
+
+        def spy(image_bytes, *args, **kwargs):
+            seen.append(args)
+            return real(image_bytes, *args, **kwargs)
+
+        import shared_kernel.paths as paths
+
+        previous_vault = paths.ASSETS_VAULT
+        paths.ASSETS_VAULT = VAULT / "assets_vault"
+        module.overlay_brand_bar = spy
+        try:
+            worker = DesignWorker(
+                gateway=OfflineModelGateway(),
+                fetcher=lambda prompt, timeout: (_image_bytes(), "image/jpeg"),
+            )
+            result = worker.execute(str(capsule), manifest)
+            image_written = (capsule / "image.jpg").is_file()
+            state = result["state"]
+        finally:
+            module.overlay_brand_bar = real
+            paths.ASSETS_VAULT = previous_vault
+            _remove(DESIGN_ID)
+
+        self.assertEqual(state, "pending_qa")
+        self.assertTrue(image_written)
+        self.assertEqual(len(seen), 1)
 
     def test_design_stage_reaches_the_typography_banner(self):
         module = self._typography()

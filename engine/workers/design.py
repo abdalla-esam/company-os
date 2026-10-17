@@ -528,6 +528,20 @@ class DesignWorker(BaseWorker):
         # 7. Optimize image for social publishing (1080px JPEG, ~90% compression savings)
         optimized_payload, img_stats = optimize_image_for_social(data)
 
+        # 7b. Cover the free provider's stamp with the company's own bar. Drawn
+        # before the headline banner so that, if the banner ever renders (it
+        # needs the Arabic stack, absent in production), it owns the lower third
+        # rather than fighting this strip for it.
+        try:
+            from data.domains.marketing.typography import overlay_brand_bar
+
+            barred_payload, barred_applied = overlay_brand_bar(optimized_payload)
+            if barred_applied:
+                optimized_payload = barred_payload
+                img_stats["brand_bar_applied"] = True
+        except Exception:
+            pass
+
         # 8. Apply optional typography banner onto the clean image (fail-safe)
         headline = self._extract_headline(capsule_path)
         if headline:
