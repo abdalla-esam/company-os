@@ -27,8 +27,17 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.normpath(os.path.join(HERE, "..", ".."))
-TICKETS_DIR = os.path.join(HERE, "tickets")
-ARCHIVE_DIR = os.path.join(HERE, "archive")
+# This domain's own data follows ``DOMAINS_DIR``, the same root the dispatcher
+# resolves its sectors from, so a harness that isolates the vault can isolate
+# this script too. Without the override ``--check`` answers from the live
+# tickets directory and its verdict depends on what the real company posted
+# this week, which is how a "can I start the next cycle?" probe becomes a
+# coin toss on a busy day. Unset (production) resolves exactly where it always
+# did: ``data/domains/ideation/...``.
+_DOMAIN_ROOT = os.environ.get("DOMAINS_DIR")
+_IDEATION_DIR = os.path.join(_DOMAIN_ROOT, "ideation") if _DOMAIN_ROOT else HERE
+TICKETS_DIR = os.path.join(_IDEATION_DIR, "tickets")
+ARCHIVE_DIR = os.path.join(_IDEATION_DIR, "archive")
 GATE_DIR = os.path.normpath(os.path.join(ROOT_DIR, "governance", "approval_gates"))
 
 if ROOT_DIR not in sys.path:

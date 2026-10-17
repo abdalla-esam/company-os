@@ -98,13 +98,30 @@ ALLOWED_NETWORK_CALLS: frozenset[tuple[str, str]] = frozenset(
 #: resurrect rule: the revision-cap suite exercises the human path on purpose).
 PRODUCTION_ROOTS: tuple[str, ...] = ("engine", "data", "ops")
 
+#: Directories holding installed third-party code rather than this project's.
+#: The deployment's virtualenv lives *inside* the checkout (``.venv``), so
+#: without this the walk scans every dependency and reports anyio's, uvicorn's
+#: and urllib3's own sockets as unpinned escapes from this codebase.
+VENDOR_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        ".tox",
+        ".nox",
+        "node_modules",
+        "site-packages",
+        "__pycache__",
+    }
+)
+
 
 def _source_files() -> list[Path]:
-    """Every ``.py`` file in the repository (sorted, cache dirs skipped)."""
+    """Every project ``.py`` file (sorted; caches and vendored trees skipped)."""
     return sorted(
         path
         for path in REPO_ROOT.rglob("*.py")
-        if ".git" not in path.parts and "__pycache__" not in path.parts
+        if not VENDOR_DIRS.intersection(path.parts)
     )
 
 
@@ -113,7 +130,11 @@ def _production_files() -> list[Path]:
     for root in PRODUCTION_ROOTS:
         base = REPO_ROOT / root
         if base.is_dir():
-            files.extend(_ for _ in base.rglob("*.py") if "__pycache__" not in _.parts)
+            files.extend(
+                _
+                for _ in base.rglob("*.py")
+                if not VENDOR_DIRS.intersection(_.parts)
+            )
     return sorted(files)
 
 
