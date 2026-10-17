@@ -14,6 +14,20 @@ services:
       - NODE_ENV=production
       - WEBHOOK_URL=http://127.0.0.1:5678/
       - GENERIC_TIMEZONE=Africa/Cairo
+      # Pinned, not auto-generated: n8n invents one on first boot and stores it
+      # in the volume, so a recreated volume silently orphans every credential
+      # n8n has saved (channel accounts included). Failing loud beats that.
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+      # The Tool Bridge bearer token, so the workflow verifies its caller
+      # instead of assuming anything on loopback is the engine.
+      - AGENCY_BRIDGE_TOKEN=${AGENCY_BRIDGE_TOKEN:?set AGENCY_BRIDGE_TOKEN in .env}
+      # The editor is served over plain http on loopback, so a Secure cookie
+      # would never come back and the login would loop forever.
+      - N8N_SECURE_COOKIE=false
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_PERSONALIZATION_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
     volumes:
       - n8n_data:/home/node/.n8n
 

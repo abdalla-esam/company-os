@@ -1,0 +1,92 @@
+{
+  "name": "agency-publish",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true,
+    "saveExecutionProgress": true
+  },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "agency-publish",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": ""
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "agency-publish"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// The Tool Bridge contract, answered by n8n.\n//\n// In : the closed request envelope of capsule_engine/bridge.py\n//       {bridge_version, gear, request_id, issued_at, deadline_ms,\n//        input_sha256, capsule, governance, input}\n// Out: the closed response envelope. The bridge verifies every field here,\n//      so anything this node invents is refused rather than delivered:\n//        - gear and request_id must echo the request (correlation)\n//        - status must be one of ok / refused / error\n//        - output.channel must EQUAL input.channel (a gear may not redirect)\n//        - output.receipt_id is the delivery proof recorded on the capsule\n//\n// Do not add keys. The bridge closes over the schema; an unknown key inside\n// `output` is a protocol violation, not a bonus field.\n\nconst item = $input.first().json || {};\nconst body = item.body || item;\nconst headers = item.headers || {};\n\nconst gear = body.gear || 'social:publish';\nconst requestId = body.request_id || '';\nconst input = body.input || {};\nconst channel = input.channel || '';\nconst text = typeof input.text === 'string' ? input.text : '';\n\nfunction answer(status, output, refusal) {\n  const envelope = {\n    bridge_version: 1,\n    gear: gear,\n    request_id: requestId || 'unknown',\n    status: status,\n    output: output || {},\n    usage: {},\n    engine: { tool: 'n8n' }\n  };\n  if (refusal) {\n    envelope.refusal = refusal;\n  }\n  return [{ json: envelope }];\n}\n\n// The token never travels in the envelope, by design: it is an Authorization\n// header. Fail closed when it is absent or wrong.\nconst sent = String(headers.authorization || headers.Authorization || '');\nconst expected = 'Bearer ' + String($env.AGENCY_BRIDGE_TOKEN || '');\nif (expected === 'Bearer ') {\n  return answer('refused', {}, {\n    code: 'not_configured',\n    detail: 'AGENCY_BRIDGE_TOKEN is not set inside the n8n container'\n  });\n}\nif (sent !== expected) {\n  return answer('refused', {}, {\n    code: 'unauthorized',\n    detail: 'missing or wrong Authorization bearer token'\n  });\n}\n\nif (gear !== 'social:publish') {\n  return answer('refused', {}, {\n    code: 'unsupported_gear',\n    detail: 'this workflow speaks social:publish only, got ' + gear\n  });\n}\nif (!requestId || !channel || !text) {\n  return answer('refused', {}, {\n    code: 'bad_request',\n    detail: 'request_id, input.channel and input.text are all required'\n  });\n}\n\n// --- the delivery -------------------------------------------------------\n// A real channel adapter belongs here (LinkedIn API, Meta Graph, a queue).\n// Today this is the honest stub: it accepts the post and returns a receipt\n// that binds this execution and the channel, so the receipt recorded on the\n// capsule can be traced back to one n8n execution.\nreturn answer('ok', {\n  receipt_id: 'n8n-' + $execution.id + '-' + channel,\n  channel: channel,\n  published_at: new Date().toISOString()\n});\n"
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Answer The Bridge",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        520,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Answer The Bridge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer The Bridge": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "company-engine"
+  },
+  "tags": []
+}
