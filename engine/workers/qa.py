@@ -15,9 +15,12 @@ Responsibilities, in order — each one fails closed:
 3. **Review (gateway)**: ``data.domains.marketing.gateway_ops.review_copy``
    over the ``ModelGateway`` returns
    ``(passed, feedback)`` — the default factory uses the real HTTP reviewer
-   when credentials are configured and the deterministic offline rules
-   (banned AI buzzwords, required tech-heavy tone) otherwise. Malformed
-   gateway verdicts (wrong type, empty feedback) are rejected as failures.
+   when credentials are configured, and the deterministic offline rules
+   (substance, and the kernel's closed slop vocabulary) otherwise. The real
+   reviewer's rubric is built from the deployed company profile, so it judges
+   the copy in the company's own voice rather than against a generic
+   enterprise standard. Malformed gateway verdicts (wrong type, empty
+   feedback) are rejected as failures.
 4. **Decision branching** — the only place the pipeline forks:
    - ``passed`` -> ``pending_design`` when ``routing_context.flags
      .requires_image is True`` (the design stage still has work), otherwise

@@ -2452,33 +2452,41 @@ async def trigger_full_pulse_beat() -> Dict[str, Any]:
 
 @router.post("/api/tools/qa_inspect")
 async def qa_inspect_endpoint(req: QAInspectRequest) -> Dict[str, Any]:
-    """Inspect copy text for tech signals, banned buzzwords and length compliance."""
-    from data.domains.marketing.gateway_ops import BANNED_BUZZWORDS, BANNED_PHRASES, TECH_SIGNALS, MIN_TECH_SIGNALS
+    """Inspect copy text for banned buzzwords/phrases and length compliance.
+
+    This is the deterministic half of the reviewer's rubric — the half that can
+    be answered without a model. Whether the copy sounds like the company is
+    the reviewer's judgement, not this endpoint's, so it is not guessed here.
+    """
+    from data.domains.marketing.gateway_ops import (
+        BANNED_BUZZWORDS,
+        BANNED_PHRASES,
+        MIN_REVIEW_WORDS,
+    )
     text = req.text.strip()
     words = text.split()
     tokens = set(re.findall(r"[\w-]+", text.lower()))
 
-    found_signals = sorted(list(tokens & TECH_SIGNALS))
     found_buzzwords = sorted(list(tokens & BANNED_BUZZWORDS))
     found_phrases = [p for p in BANNED_PHRASES if p in text.lower()]
 
-    passed = (len(found_signals) >= MIN_TECH_SIGNALS) and (not found_buzzwords) and (not found_phrases) and (len(words) >= 10)
+    passed = (
+        (not found_buzzwords)
+        and (not found_phrases)
+        and (len(words) >= MIN_REVIEW_WORDS)
+    )
 
     reasons = []
-    if len(found_signals) < MIN_TECH_SIGNALS:
-        reasons.append(f"Insufficient technical signals ({len(found_signals)}/{MIN_TECH_SIGNALS})")
     if found_buzzwords:
         reasons.append(f"Contains banned buzzwords: {', '.join(found_buzzwords)}")
     if found_phrases:
         reasons.append(f"Contains banned phrases: {', '.join(found_phrases)}")
-    if len(words) < 10:
-        reasons.append(f"Text too short ({len(words)} words)")
+    if len(words) < MIN_REVIEW_WORDS:
+        reasons.append(f"Text too short ({len(words)} words; need {MIN_REVIEW_WORDS})")
 
     return {
         "status": "success",
         "passed": passed,
-        "signals_count": len(found_signals),
-        "signals_found": found_signals,
         "banned_buzzwords": found_buzzwords,
         "banned_phrases": found_phrases,
         "word_count": len(words),
@@ -2509,7 +2517,7 @@ async def prompt_distill_endpoint(req: PromptDistillRequest) -> Dict[str, Any]:
 async def test_image_endpoint(req: TestImageRequest) -> Dict[str, Any]:
     """Test image generation through Hugging Face FLUX.1 or Pollinations."""
     from workers.design import fetch_free_image
-    prompt = (req.prompt or "Sovereign AI autonomous company engine operations hub, photorealistic, corporate editorial").strip()
+    prompt = (req.prompt or "a tidy modern office desk with a laptop and a notebook, soft natural daylight, photorealistic").strip()
     try:
         raw_bytes, ctype = await asyncio.to_thread(fetch_free_image, prompt, 35.0)
         import workers.design as dmod

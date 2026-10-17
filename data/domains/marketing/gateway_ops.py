@@ -8,10 +8,10 @@ module owns the marketing side of the model seam:
 - the mandatory image aesthetic and its word budget;
 - the Context-Aware Visual Director prompt used when the model leaks Arabic
   letters into an image prompt;
-- the editorial review heuristics (tech-signal tone) and the reviewer
-  contract that consumes them — over the kernel's closed slop vocabulary
-  (:mod:`capsule_engine.editorial`), which the deterministic ``qa_review`` gate
-  enforces too, so both sides reject exactly the same text;
+- the editorial review heuristics (the closed slop vocabulary, plus substance)
+  and the reviewer contract that consumes them — over the kernel's closed slop
+  vocabulary (:mod:`capsule_engine.editorial`), which the deterministic
+  ``qa_review`` gate enforces too, so both sides reject the same words;
 - the two marketing operations as free functions:
   ``image_prompt(gateway, copy_text, manifest=None)`` and
   ``review_copy(gateway, copy_text)``.
@@ -40,6 +40,14 @@ from capsule_engine.gateway import (
 )
 from capsule_engine.manifest import USAGE_KEYS
 
+# The deployed company's identity, rendered for a prompt. Absent when the
+# deployment has no profile — every rubric then falls back to its neutral,
+# company-agnostic wording rather than to nothing.
+try:
+    from shared_kernel.brand_profile import company_prompt_context
+except ImportError:  # pragma: no cover - standalone execution
+    company_prompt_context = None  # type: ignore[assignment]
+
 __all__ = [
     "BANNED_BUZZWORDS",
     "BANNED_PHRASES",
@@ -48,11 +56,10 @@ __all__ = [
     "IMAGE_SYSTEM_PROMPT",
     "MAX_IMAGE_PROMPT_WORDS",
     "MIN_REVIEW_WORDS",
-    "MIN_TECH_SIGNALS",
     "REVIEW_SYSTEM_PROMPT",
-    "TECH_SIGNALS",
     "VISUAL_DIRECTOR_SYSTEM_PROMPT",
     "build_context_aware_visual_prompt",
+    "build_review_system_prompt",
     "image_prompt",
     "prepare_gateway_env",
     "review_copy",
@@ -111,23 +118,13 @@ IMAGE_SUBJECT_BUDGET = MAX_IMAGE_PROMPT_WORDS - len(IMAGE_AESTHETIC.split())
 # vocabulary (:mod:`capsule_engine.editorial`), imported above and re-exported
 # here: the reviewer prompt below is generated from the same list the
 # deterministic ``qa_review`` gate enforces.
-
-# The tech-heavy tone the agency requires: at least MIN_TECH_SIGNALS distinct
-# signals must appear as whole tokens in the copy.
-TECH_SIGNALS = frozenset(
-    {
-        "api", "agent", "architecture", "automation", "backend", "cache",
-        "client", "code", "data", "database", "deploy", "encryption",
-        "engine", "gateway", "kernel", "latency", "model", "node", "pipeline",
-        "protocol", "router", "routing", "runtime", "stack", "system",
-        "terminal", "throughput", "webhook", "workflow",
-        # Arabic technical terms (whole tokens):
-        "نظام", "أنظمة", "أتمتة", "معمارية", "بيانات", "خوارزمية", "خوارزميات",
-        "مسار", "مسارات", "منصة", "منصات", "بنية", "بنى", "نموذج", "نماذج",
-        "محرك", "محركات", "بروتوكول", "واجهة",
-    }
-)
-MIN_TECH_SIGNALS = 2
+#
+# A third rule used to live here — ``MIN_TECH_SIGNALS`` technical signals, the
+# "technical authority" threshold — because the rubric was written for an
+# enterprise-architecture feed. It was removed rather than relaxed: it demanded
+# the copy be *harder* than its audience, which is the opposite of what a
+# business selling plain, practical software wants to publish. Technical
+# vocabulary is now neither required nor banned; only clarity is judged.
 MIN_REVIEW_WORDS = 10
 
 # --------------------------------------------------------------------------- #
@@ -142,34 +139,60 @@ IMAGE_SYSTEM_PROMPT = (
 )
 
 REVIEW_SYSTEM_PROMPT = (
-    "You are the senior editorial and QA director of an elite tech agency. "
-    "Enforce rigorous quality standards on the provided copy across any language. "
-    "Reject copy immediately if: "
+    "You are the senior editorial and QA director for a company that publishes "
+    "its own marketing copy. Enforce rigorous quality standards on the provided "
+    "copy across any language. Reject copy immediately if: "
     "1) It uses any banned buzzwords ("
     + ", ".join(sorted(BANNED_BUZZWORDS))
     + ") or banned phrases ("
     + ", ".join(BANNED_PHRASES)
-    + f"); 2) It lacks sufficient technical authority (fewer than {MIN_TECH_SIGNALS} technical signal terms); "
-    + f"3) It is shorter than {MIN_REVIEW_WORDS} words or lacks a clear headline hook and call-to-action; "
-    "4) It sounds like generic AI-slop rather than an authoritative thought-leadership post. "
+    + "). Judge only the words that are actually present: never report a banned "
+    "word as 'implied' or 'suggested', and never reject a rewrite request over a "
+    "banned word you cannot quote from the copy; "
+    f"2) It is shorter than {MIN_REVIEW_WORDS} words, or has no clear headline "
+    "hook, or has no call to action; "
+    "3) It reads as generic AI-slop rather than as something one specific "
+    "company would say; "
+    "4) A business owner outside the software industry could not follow it — "
+    "unexplained jargon is a defect, not authority, and technical vocabulary is "
+    "neither required nor penalised. "
     "Reply with STRICT JSON only: "
     '{"passed": true|false, "feedback": "one clear actionable sentence in English"}'
 )
 
+
+def build_review_system_prompt() -> str:
+    """The reviewer's rubric, grounded in the deployed company profile.
+
+    The base rubric is deliberately company-agnostic; the profile block is
+    appended when one exists so the reviewer judges the copy against the voice
+    the company actually asked for — its tone, its reader, the languages it
+    publishes in — instead of a standard that belongs to nobody.
+
+    Returns the base rubric unchanged when the deployment has no profile, so an
+    un-configured company is reviewed exactly as it was before this existed.
+    """
+    block = ""
+    if company_prompt_context is not None:
+        context = company_prompt_context().strip()
+        if context:
+            block = f"\n{context}\n"
+    return f"{REVIEW_SYSTEM_PROMPT}{block}"
+
 VISUAL_DIRECTOR_SYSTEM_PROMPT = (
-    "You are an elite Context-Aware Visual Director and cinematic AI prompt engineer. "
-    "Your responsibility is to craft a single, breathtaking visual scene prompt for image generation in STRICTLY ENGLISH. "
+    "You are a Context-Aware Visual Director and photographic prompt engineer. "
+    "Your responsibility is to craft a single, believable visual scene prompt for image generation in STRICTLY ENGLISH. "
     "Rules: "
     "1. LANGUAGE: 100% English only. Absolutely NO Arabic words, letters, or scripts. "
     "2. CONTEXT AWARENESS (Country & Occasion): "
-    "- If Egypt / 6th of October: Evoke majestic Pyramids of Giza, golden Sinai desert dunes, glorious golden hour sunlight, proud billowing Egyptian flags, heroic spirit of crossing and triumph. "
-    "- If Saudi Arabia / Founding Day / National Day: Evoke historic Diriyah Najdi architecture, futuristic Riyadh skyline, golden desert dunes at twilight, rich celebratory green banners. "
-    "- If UAE / Gulf: Evoke striking futuristic skyline, luminous architectural marvels, modern luxury oasis at dusk. "
-    "- If Tech / Sovereign Agency OS: Evoke an elite executive command center, holographic system architectures, glowing fiber-optic data streams, sophisticated minimalist glass and steel. "
-    "3. BRAND NATURE: High luxury, corporate prestige, photorealistic medium format photography. "
-    "Strictly NO cartoon, NO 3D render illustration, NO anime, NO distorted text, NO text overlays, NO watermarks. "
-    "4. GENERATION EXCELLENCE: Dramatic cinematic lighting (golden hour or volumetric chiaroscuro), ultra-detailed 8k resolution, "
-    "professional camera angles (cinematic wide angle or dynamic low angle, rule of thirds). "
+    "- If Egypt / 6th of October: Evoke the Pyramids of Giza and golden Sinai desert dunes in warm daylight, a calm sense of national pride. "
+    "- If Saudi Arabia / Founding Day / National Day: Evoke historic Diriyah Najdi architecture meeting a modern Riyadh skyline, golden desert dunes at twilight. "
+    "- If UAE / Gulf: Evoke a modern Gulf city skyline at dusk, clean and uncluttered. "
+    "- If Software / Business Technology: Evoke an ordinary modern workplace — a tidy desk, a laptop, a notebook, natural daylight through a window, someone working quietly. Prefer the everyday and the specific over the spectacular. "
+    "3. BRAND NATURE: Clean, modern and believable — a workplace the reader recognises, photographed in natural light. Never ornate, never opulent, never science-fiction. "
+    "Strictly NO cartoon, NO 3D render illustration, NO anime, NO glowing holograms, NO distorted text, NO text overlays, NO watermarks. "
+    "4. GENERATION EXCELLENCE: Soft natural or golden-hour light, shallow depth of field, ultra-detailed 8k resolution, "
+    "professional camera angles (rule of thirds). "
     f"5. LENGTH: Concise, under {IMAGE_SUBJECT_BUDGET} words. Output the English scene description only, no quotes, no markdown."
 )
 
@@ -223,48 +246,49 @@ def build_context_aware_visual_prompt(
             "أبوظبي", "abudhabi"
         )
     )
-    # Check Tech / Sovereign OS
+    # Check Software / Business Technology
     is_tech = any(
         kw in combined
         for kw in (
-            "sovereign agency os", "quantum flux", "agent", "pipeline",
-            "router", "routing", "terminal", "kernel", "نظام", "أتمتة",
-            "معمارية", "بيانات", "خوارزمية"
+            "software", "website", "web app", "system", "workflow",
+            "automation", "data entry", "invoice", "excel", "spreadsheet",
+            "نظام", "أنظمة", "برنامج", "برامج", "موقع", "مواقع", "أتمتة",
+            "بيانات", "فاتورة", "فواتير", "إكسيل", "جدول"
         )
     )
 
     if is_egypt_october:
         subject = (
-            "majestic Pyramids of Giza and vast golden Sinai desert dunes during golden hour, "
-            "proud Egyptian flags fluttering with dignity against the horizon, "
-            "heroic spirit of crossing and triumph, luxury corporate prestige, "
-            "8k Hasselblad medium format photography, dramatic cinematic wide angle"
+            "the Pyramids of Giza and golden Sinai desert dunes in warm daylight, "
+            "a calm sense of national pride, "
+            "8k Hasselblad medium format photography, wide angle"
         )
     elif is_saudi:
         subject = (
-            "majestic historic Diriyah Najdi architecture meeting futuristic modern Riyadh skyline, "
-            "golden desert dunes at sunset, celebratory green banners of pride, "
-            "luxury brand prestige, 8k resolution, dramatic cinematic low angle"
+            "historic Diriyah Najdi architecture meeting a modern Riyadh skyline, "
+            "golden desert dunes at twilight, "
+            "8k resolution, wide angle"
         )
     elif is_uae:
         subject = (
-            "striking futuristic Dubai skyline with luminous architectural marvels, "
-            "modern luxury corporate oasis at dusk, ambient dusk lighting, "
-            "8k details, dramatic cinematic wide perspective"
+            "a modern Gulf city skyline at dusk, clean and uncluttered, "
+            "8k details, wide perspective"
         )
     elif is_tech:
         subject = (
-            "sleek executive command center with holographic system architectures, "
-            "glowing fiber-optic data streams, minimalist luxury glass and steel, "
-            "8k resolution, dramatic chiaroscuro volumetric lighting"
+            "a calm and tidy modern workspace: a desk with a laptop, a notebook "
+            "and a cup of coffee, soft natural daylight through a window, "
+            "8k details, shallow depth of field"
         )
     else:
         # Clean topic keywords in English or clean transliteration
         clean_words = [w for w in re.findall(r"[a-zA-Z0-9]+", topic) if len(w) > 2]
-        topic_hint = " ".join(clean_words[:4]) if clean_words else "corporate sovereign leadership"
+        topic_hint = (
+            " ".join(clean_words[:4]) if clean_words else "a modern business workplace"
+        )
         subject = (
-            f"luxurious executive corporate setting with minimalist modern architecture, "
-            f"dramatic cinematic lighting, 8k details, professional wide angle, {topic_hint}"
+            f"a bright and tidy modern workplace, soft natural daylight, "
+            f"8k details, shallow depth of field, {topic_hint}"
         )
 
     # Append the mandatory IMAGE_AESTHETIC
@@ -345,7 +369,7 @@ def review_copy(gateway: Any, copy_text: str) -> tuple[bool, str]:
         return False, "REJECTED: copy is empty — nothing to review."
     raw = gateway._call_llm(
         [
-            {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
+            {"role": "system", "content": build_review_system_prompt()},
             {"role": "user", "content": copy_text},
         ],
         getattr(gateway, "_model", DEFAULT_MODEL),
@@ -446,9 +470,13 @@ def _offline_review_copy(gateway: Any, copy_text: str) -> tuple[bool, str]:
     Rules (pure functions of ``copy_text`` — same input, same verdict):
     1. length sanity: fewer than :data:`MIN_REVIEW_WORDS` tokens fails;
     2. banned AI buzzwords: any :data:`BANNED_BUZZWORDS` /
-        :data:`BANNED_PHRASES` hit fails;
-    3. tech-heavy tone: at least :data:`MIN_TECH_SIGNALS` distinct
-        :data:`TECH_SIGNALS` must appear.
+        :data:`BANNED_PHRASES` hit fails.
+
+    Only what a pure function can actually decide is decided here. Whether the
+    copy sounds like the company, reads clearly, and carries a hook and a call
+    to action is the reviewer's judgement; the offline path must not pretend to
+    make it — least of all by demanding technical vocabulary the company never
+    asked for.
     """
     _zero_usage(gateway)
     if not isinstance(copy_text, str) or not copy_text.strip():
@@ -466,13 +494,6 @@ def _offline_review_copy(gateway: Any, copy_text: str) -> tuple[bool, str]:
     if hits:
         problems.append(f"banned buzzwords present: {', '.join(hits)}")
 
-    signals = sorted(signal for signal in TECH_SIGNALS if signal in token_set)
-    if len(signals) < MIN_TECH_SIGNALS:
-        problems.append(
-            f"tech-heavy tone missing ({len(signals)} signal(s); "
-            f"need {MIN_TECH_SIGNALS})"
-        )
-
     if len(tokens) < MIN_REVIEW_WORDS:
         problems.append(
             f"copy too short ({len(tokens)} words; need {MIN_REVIEW_WORDS})"
@@ -481,9 +502,7 @@ def _offline_review_copy(gateway: Any, copy_text: str) -> tuple[bool, str]:
     if problems:
         return False, "REJECTED: " + "; ".join(problems) + " — revise and resubmit."
     return True, (
-        "PASSED: tech-heavy tone confirmed "
-        f"({len(signals)} signals: {', '.join(signals)}); "
-        "no banned buzzwords."
+        f"PASSED: no banned buzzwords; {len(tokens)} words of reviewable copy."
     )
 
 
