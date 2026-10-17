@@ -27,6 +27,7 @@ from tests import _bootstrap  # noqa: F401  — isolated vault before engine imp
 import asyncio
 import hashlib
 import json
+import re
 import shutil
 import unittest
 from pathlib import Path
@@ -45,10 +46,12 @@ from capsule_engine.router import (  # noqa: E402
 )
 from fastapi import HTTPException  # noqa: E402
 from orchestration import access_control, api  # noqa: E402
+from orchestration import copy_signoff  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from workers.qa import QAWorker  # noqa: E402
 
 ENGINE_CONFIG = VAULT / "engine.json"
+REPO_ROOT = _bootstrap.REPO_ROOT
 COPY_FILE = "copy.md"
 
 COPY_TEXT = (
@@ -528,6 +531,110 @@ class CopySignoffDecisionRouteTests(unittest.TestCase):
             self._decide("cap_signoff_twice", decision="approved")
 
         self.assertEqual(caught.exception.status_code, 409)
+
+
+def _apply_callers() -> list[str]:
+    """Every production module that calls the sign-off service."""
+    found: list[str] = []
+    for root in ("engine", "ops", "data", "shared_kernel"):
+        base = REPO_ROOT / root
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            source = path.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"\bcopy_signoff\.apply\s*\(", source):
+                found.append(str(path.relative_to(REPO_ROOT)))
+    return found
+
+
+class TheServiceCarriesTheDecisionTests(unittest.TestCase):
+    """One implementation, two callers: the app's button and the runbook.
+
+    Everything a capsule review consists of — the state guard, the digest
+    binding, the ``feedback.txt`` write, the transition — lives in
+    ``orchestration.copy_signoff``. A second implementation anywhere else is
+    how a runbook quietly starts approving things the app would have refused.
+    """
+
+    def setUp(self) -> None:
+        self._created: list[str] = []
+
+    def tearDown(self) -> None:
+        for capsule_id in self._created:
+            shutil.rmtree(SPOOL / capsule_id, ignore_errors=True)
+        _restore_engine_config()
+
+    def _awaiting(self, capsule_id: str, *, copy_text: str = COPY_TEXT) -> Path:
+        digest = hashlib.sha256(copy_text.encode("utf-8")).hexdigest()
+        manifest = _manifest(
+            capsule_id,
+            State.PENDING_DESIGN,
+            metadata={
+                "copy_signoff": {
+                    "decision": "awaiting",
+                    "requested_at": "2026-10-17T00:00:00+00:00",
+                    "requested_by": "qa",
+                    "copy_sha256": digest,
+                }
+            },
+        )
+        capsule_dir = _place(manifest, copy_text)
+        self._created.append(capsule_id)
+        return capsule_dir
+
+    def test_the_runbook_path_needs_no_http_and_no_principal(self) -> None:
+        """``post_cycle_trial.py`` calls the service directly, as a reviewer."""
+        capsule_dir = self._awaiting("cap_signoff_service")
+
+        outcome = copy_signoff.apply(
+            capsule_dir,
+            decision="approved",
+            reviewer="trial_human",
+            audit_note="offline trial sign-off",
+        )
+
+        self.assertEqual(outcome.decision, "approved")
+        self.assertEqual(outcome.new_state, State.PENDING_DESIGN.value)
+        record = load_manifest(capsule_dir)["metadata"]["copy_signoff"]
+        self.assertEqual(record["decided_by"], "trial_human")
+        # The exact code path the app's button takes, refusals included.
+        with self.assertRaises(copy_signoff.CopySignoffRefused) as caught:
+            copy_signoff.apply(
+                capsule_dir, decision="approved", reviewer="trial_human"
+            )
+        self.assertEqual(caught.exception.status_code, 409)
+
+    def test_the_service_reaches_the_author_with_the_reason(self) -> None:
+        capsule_dir = self._awaiting("cap_signoff_service_reject")
+
+        copy_signoff.apply(
+            capsule_dir,
+            decision="rejected",
+            reason="the opening is weak",
+            reviewer="trial_human",
+        )
+
+        self.assertEqual(
+            load_manifest(capsule_dir)["state"], State.NEEDS_REVISION.value
+        )
+        self.assertIn(
+            "the opening is weak",
+            (capsule_dir / "feedback.txt").read_text(encoding="utf-8"),
+        )
+
+    def test_only_the_route_and_the_runbook_apply_a_decision(self) -> None:
+        self.assertEqual(
+            _apply_callers(),
+            [
+                "engine/orchestration/api.py",
+                "ops/tools/post_cycle_trial.py",
+            ],
+            "a new caller applied a copy sign-off — the decision is a human "
+            "boundary; route it through orchestration.copy_signoff or pin it "
+            "here on purpose",
+        )
 
 
 if __name__ == "__main__":

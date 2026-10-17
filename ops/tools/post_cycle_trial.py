@@ -15,8 +15,13 @@ the cockpit can show them. It performs **zero external side effects**:
 
 Lifecycle exercised:
   tracker ticket -> gate -> human approve -> settle -> dispatcher -> capsule
-  -> marketing -> qa -> design -> pending_approval
+  -> marketing -> qa -> [copy sign-off: the runbook answers as --reviewer]
+  -> design -> pending_approval
   -> human approve (SHA-256 verified) -> publishing -> published
+
+The copy sign-off is the one stage that waits on a person (the app is where a
+person answers it). The runbook answers it itself and prints the step, so an
+automated cycle still reaches ``published`` without hiding the hold.
 
 Every step prints one JSON line. Exit 0 only when the capsule is `published`.
 Run:  python3 tools/post_cycle_trial.py
@@ -113,6 +118,38 @@ def read_state(capsule_id: str) -> str | None:
         return None
 
 
+def sign_off_copy(capsule_id: str, reviewer: str) -> bool:
+    """Sign the copy off so an automated cycle can still reach ``published``.
+
+    The copy sign-off parks a capsule at ``pending_design`` until a person has
+    read the words, and in the app a person is exactly who decides. This
+    runbook is the automated one, so it decides as ``reviewer`` — through the
+    same ``orchestration.copy_signoff`` the app's button calls, digest check
+    and all — and reports the step, so the hold shows up in the run instead of
+    being bypassed in silence.
+    """
+    from orchestration import copy_signoff  # noqa: E402
+
+    try:
+        outcome = copy_signoff.apply(
+            _spool_dir() / capsule_id,
+            decision="approved",
+            reason="",
+            reviewer=reviewer,
+            audit_note="live trial sign-off" if LIVE else "offline trial sign-off",
+        )
+    except Exception as exc:  # a refusal is a result, not a crash
+        step(
+            "copy_signoff",
+            False,
+            state=read_state(capsule_id),
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+    step("copy_signoff", True, state=outcome.new_state, by=reviewer)
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     global CHILD_ENV, LIVE
     parser = argparse.ArgumentParser(description="Full post lifecycle against the live vault.")
@@ -181,12 +218,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     capsule_id = new[0]
 
-    # 5. factory pulse: marketing -> qa -> design -> qa -> pending_approval
+    # 5. factory pulse: marketing -> qa -> [copy sign-off] -> design -> qa
+    #    -> pending_approval. The sign-off is the one stage that waits on a
+    #    person, so the runbook answers it as its reviewer and says so.
+    from capsule_engine import State, load_manifest, save_manifest, transition  # noqa: E402
+    from capsule_engine.locking import CapsuleLock  # noqa: E402
+
     pulse = str(REPO / "engine" / "orchestration" / "capsule_pulse.py")
     for attempt in range(1, 7):
         rc, out, err = run([pulse, "--max-transitions", "8"], REPO)
         state = read_state(capsule_id)
         step(f"pulse_{attempt}", rc == 0, state=state)
+        if state == State.PENDING_DESIGN.value and not sign_off_copy(capsule_id, args.reviewer):
+            return 1
         if state in ("pending_approval", "failed", "stalled"):
             break
         time.sleep(0.5)
@@ -196,9 +240,6 @@ def main(argv: list[str] | None = None) -> int:
     step("reached_gate", True, capsule_id=capsule_id)
 
     # 6. human approves the deliverable (TOCTOU hash verified by transition)
-    from capsule_engine import State, load_manifest, save_manifest, transition  # noqa: E402
-    from capsule_engine.locking import CapsuleLock  # noqa: E402
-
     cap = _spool_dir() / capsule_id
     with CapsuleLock(cap):
         manifest = load_manifest(cap)

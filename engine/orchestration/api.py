@@ -108,7 +108,6 @@ from capsule_engine.governance import (
 from capsule_engine.locking import CapsuleLock
 from capsule_engine.manifest import (
     ARTIFACT_FILE,
-    append_history,
     now_iso,
     seat_at_approval_gate,
     transition,
@@ -118,6 +117,7 @@ from capsule_engine.capabilities import resolve_secret
 from workers.publishing import GEAR as PUBLISHING_GEAR
 from orchestration import access_control
 from orchestration import approval
+from orchestration import copy_signoff
 from orchestration.v1 import errors as v1_errors
 from orchestration import read_index
 from orchestration import work_queue
@@ -3069,94 +3069,29 @@ async def decide_copy_signoff(
     reviewer, audit_note = _decision_identity(request)
     capsule_path = _confined_capsule_path(clean_id)
 
-    decision = (req.decision or "").strip().lower()
-    if decision not in ("approved", "rejected"):
+    # The branch permission is this route's business; the decision itself is
+    # ``orchestration.copy_signoff``'s, so the trial runbook reaches the same
+    # code the app's button does.
+    _require_scope(
+        request, "capsule:approve", _capsule_domain(load_manifest(capsule_path))
+    )
+    try:
+        outcome = copy_signoff.apply(
+            capsule_path,
+            decision=req.decision or "",
+            reason=req.reason or "",
+            reviewer=reviewer,
+            audit_note=audit_note,
+        )
+    except copy_signoff.CopySignoffRefused as refused:
         raise HTTPException(
-            status_code=400, detail="decision must be 'approved' or 'rejected'"
-        )
-    reason = (req.reason or "").strip()
-    if decision == "rejected" and not reason:
-        raise HTTPException(
-            status_code=400, detail="a rejection needs a reason for the author"
-        )
-
-    with CapsuleLock(capsule_path):
-        manifest = load_manifest(capsule_path)
-        domain = _capsule_domain(manifest)
-        _require_scope(request, "capsule:approve", domain)
-
-        state = manifest.get("state")
-        if state != State.PENDING_DESIGN.value:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "no copy sign-off is pending: the capsule is "
-                    f"{state!r}, and a sign-off is only owed at "
-                    f"{State.PENDING_DESIGN.value!r}"
-                ),
-            )
-
-        metadata = manifest.get("metadata")
-        record = (
-            metadata.get("copy_signoff") if isinstance(metadata, dict) else None
-        )
-        if not isinstance(record, dict) or record.get("decision") != "awaiting":
-            raise HTTPException(
-                status_code=409, detail="the copy sign-off is not awaiting a decision"
-            )
-
-        copy_file = capsule_path / ARTIFACT_FILE
-        if not copy_file.is_file():
-            raise HTTPException(
-                status_code=409, detail="the copy is missing from the capsule"
-            )
-        live_digest = hashlib.sha256(copy_file.read_bytes()).hexdigest()
-        bound_digest = str(record.get("copy_sha256") or "")
-        if bound_digest and bound_digest != live_digest:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "the copy changed after the sign-off was requested "
-                    "(TOCTOU) — read it again before deciding"
-                ),
-            )
-
-        decided_at = datetime.now(timezone.utc).isoformat()
-        # The record holds a *decision*, not a capsule state: the capsule's own
-        # state only ever moves through ``transition`` below.
-        record["decision"] = decision
-        record["decided_by"] = reviewer
-        record["decided_at"] = decided_at
-        record["reason"] = reason
-        record["copy_sha256"] = live_digest
-        metadata["copy_signoff"] = record
-
-        if decision == "rejected":
-            (capsule_path / "feedback.txt").write_text(
-                f"{reason}\n", encoding="utf-8"
-            )
-            transition(
-                manifest,
-                State.NEEDS_REVISION,
-                by=reviewer,
-                why=f"copy sign-off rejected: {reason} — {audit_note}",
-                capsule_path=capsule_path,
-            )
-        else:
-            append_history(
-                manifest,
-                by=reviewer,
-                why=f"copy signed off: {audit_note}",
-                from_state=State.PENDING_DESIGN,
-                to_state=State.PENDING_DESIGN,
-            )
-
-        save_manifest(capsule_path, manifest)
-        final_state = manifest.get("state", state)
+            status_code=refused.status_code, detail=refused.detail
+        ) from refused
 
     # A pulse moves the capsule on: design on an approval, the author on a
-    # rejection. The decision itself is already durable above, so a pulse that
-    # cannot run is reported and never rolls the decision back.
+    # rejection. The decision itself is already durable, so a pulse that cannot
+    # run is reported and never rolls the decision back.
+    final_state = outcome.new_state
     try:
         run_pulse(SPOOL_DIR)
         final_state = load_manifest(capsule_path).get("state", final_state)
@@ -3166,13 +3101,13 @@ async def decide_copy_signoff(
     return {
         "status": "success",
         "capsule_id": clean_id,
-        "decision": decision,
+        "decision": outcome.decision,
         "new_state": final_state,
-        "decided_by": reviewer,
-        "decided_at": decided_at,
+        "decided_by": outcome.decided_by,
+        "decided_at": outcome.decided_at,
         "message": (
             "Copy approved — the design stage runs on the next pulse."
-            if decision == "approved"
+            if outcome.decision == "approved"
             else "Copy rejected — the capsule returns to the author with the reason."
         ),
     }
