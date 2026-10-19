@@ -48,7 +48,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, ClassVar, Mapping, MutableMapping
+from typing import Any, ClassVar, Mapping, MutableMapping, Sequence, TYPE_CHECKING
 
 from capsule_engine.exceptions import (
     CapsuleNotFoundError,
@@ -78,6 +78,9 @@ from capsule_engine.manifest import (
     validate_manifest,
 )
 from capsule_engine import trace as trace_engine
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from capsule_engine.tool_loop import LoopResult
 
 logger = logging.getLogger("capsule_engine.worker")
 
@@ -536,6 +539,99 @@ class BaseWorker(ABC):
         if not merged:
             return {}
         return accumulate_usage(manifest, merged)
+
+    # ------------------------------------------------------------------ #
+    # the tool loop (model ↔ gears)
+    # ------------------------------------------------------------------ #
+
+    def run_tools(
+        self,
+        capsule_path: str,
+        manifest: MutableMapping[str, Any],
+        messages: list[dict[str, Any]],
+        *,
+        gears: Sequence[str] | None = None,
+        max_steps: int | None = None,
+        max_tool_calls: int | None = None,
+        include_irreversible: bool = False,
+        offline: bool | None = None,
+        temperature: float | None = None,
+        step_name: str = "tool loop",
+    ) -> "LoopResult":
+        """Run one bounded model↔gear loop for this capsule.
+
+        The worker supplies the transcript (system + user messages); the loop
+        decides which gears to call, executes them through the governed bridge,
+        and returns the final answer plus the whole transcript. Everything the
+        loop touches is already accounted for: the bridge meters each gear
+        attempt, the gateway meters each model turn, and this method folds the
+        loop's totals into ``metadata.usage`` and the trace step.
+
+        Args:
+            capsule_path: capsule root (used for the trace + capsule context).
+            manifest: the live manifest (mutated: usage, gear exchanges).
+            messages: the initial transcript.
+            gears: restrict the offered tools (``None`` = every safe gear).
+            max_steps / max_tool_calls: hard bounds; the loop stops and says so.
+            include_irreversible: also offer publish/send (off by default).
+            offline: force the offline bridge (``None`` = follow the env).
+            temperature: model temperature override.
+
+        Raises:
+            SpendCapExceeded: the budget refused — never swallowed.
+            GatewayError: the model could not answer at all.
+
+        A loop that hits a bound is **not** an exception: read
+        ``result.stopped_reason`` and ``result.ok``.
+        """
+        from capsule_engine.governance import domain_of, level_for
+        from capsule_engine.gateway import default_gateway
+        from capsule_engine.tool_bridge import GearToolRunner, gear_tools
+        from capsule_engine.tool_loop import (
+            DEFAULT_MAX_STEPS,
+            DEFAULT_MAX_TOOL_CALLS,
+            ToolLoop,
+        )
+
+        gateway = getattr(self, "_gateway", None) or default_gateway()
+        domain = str(manifest.get("domain") or domain_of(manifest))
+        capsule_context = {
+            "id": str(manifest.get("capsule_id") or Path(capsule_path).name),
+            "state": str(manifest.get("state")),
+            "attempt": int(manifest.get("attempt") or 0),
+            "domain": domain,
+        }
+        governance_context = {"domain": domain, "autonomy_level": level_for(domain)}
+        runner = GearToolRunner(
+            capsule=capsule_context,
+            governance=governance_context,
+            offline=offline,
+        )
+        tools = gear_tools(
+            include_irreversible=include_irreversible,
+            only=gears,
+        )
+        allowed = [tool["function"]["name"] for tool in tools]
+        loop = ToolLoop(
+            gateway,
+            runner,
+            max_steps=DEFAULT_MAX_STEPS if max_steps is None else max_steps,
+            max_tool_calls=(
+                DEFAULT_MAX_TOOL_CALLS if max_tool_calls is None else max_tool_calls
+            ),
+            allowed_gears=allowed,
+        )
+        with self.trace_step(step_name, gear="tool_loop") as step:
+            result = loop.run(
+                manifest,
+                messages,
+                tools,
+                temperature=temperature,
+            )
+            step.add_tokens(result.usage)
+            self.account_usage(manifest, result.usage)
+        self.record(manifest, result.summary())
+        return result
 
     def _governance_hooks(
         self,

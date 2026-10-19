@@ -43,10 +43,38 @@ shared_kernel  ←  capsule_engine  ←  workers  ←  orchestration
 | **Memory** | `memory.py` | ledger hash-chained · يغذّي قيود سلبية |
 | **Spend** | `spend_control.py` | `authorize` قبل · `record` بعد |
 | **Capabilities** | `capabilities.py` | HMAC grants بدل توكن شامل |
-| **Model seam** | `gateway.py` | OpenAI-compatible + offline |
+| **Model seam** | `gateway.py` | OpenAI-compatible + offline · `complete` + `complete_turn` |
+| **Tool bridge** | `tool_bridge.py` | العقد → أداة JSON-schema + تنفيذ محكوم |
+| **Tool loop** | `tool_loop.py` | حلقة الموديل ↔ التروس، محدودة بـ 4/6 |
 | **Task types** | `task_type.py` | pipeline كـ JSON |
 | **Gears** | `gear_registry.py` | 16 فعل قانوني |
 | **Trace** | `trace.py` | `execution_trace.jsonl` |
+
+## حلقة الأدوات (W1)
+
+```
+BaseWorker.run_tools()
+        │
+        ├─ gear_tools() ──► تعريفات JSON-schema (من GEAR_CONTRACTS)
+        │
+        ▼
+   ToolLoop.run() ──► gateway.complete_turn() ──► موديل
+        │                    │
+        │                    └─ tool_calls?
+        │                          │
+        │                          ▼
+        │              GearToolRunner.call()
+        │                          │
+        │                          ▼
+        │              bridge.invoke()  ← نفس الجسر المحكوم
+        │                 (عقد · رفض · ميزانية · تسجيل)
+        │                          │
+        └──────────────────────────┘  النتيجة تُلحق كرسالة tool
+```
+
+**الحدود:** 4 دورات موديل · 6 استدعاءات أدوات · 8 استدعاءات في الدورة الواحدة.
+**الحجب:** `social:publish` · `message:send` لا تُنشر إلا بطلب صريح.
+**الفشل:** كل خطأ أداة يُعاد للموديل كبيانات؛ `SpendCapExceeded` وحده يعبر.
 
 ## مسار الكبسولة
 

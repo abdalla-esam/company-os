@@ -96,6 +96,7 @@ from capsule_engine.gateway import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_BASE_BACKOFF,
     OFFLINE_MODE_ENV,
+    AssistantTurn,
     GatewayConfigError,
     GatewayError,
     GatewayHTTPError,
@@ -135,6 +136,22 @@ from capsule_engine.bridge import (
     resolve_endpoint,
     settle_exchange,
     validate_output,
+)
+from capsule_engine.tool_bridge import (
+    FIELD_SCHEMAS,
+    GEAR_TOOL_PREFIX,
+    IRREVERSIBLE_GEARS,
+    GearToolRunner,
+    ToolCallOutcome,
+    gear_for_tool,
+    gear_tools,
+    tool_name_for,
+)
+from capsule_engine.tool_loop import (
+    DEFAULT_MAX_STEPS,
+    DEFAULT_MAX_TOOL_CALLS,
+    LoopResult,
+    ToolLoop,
 )
 from capsule_engine.governance import (
     DEFAULT_AUDIT_RATE,
@@ -342,6 +359,7 @@ __all__ = [
     # gateway
     "ModelGateway",
     "OfflineModelGateway",
+    "AssistantTurn",
     "default_gateway",
     "DEFAULT_MODEL",
     "DEFAULT_BASE_URL",
@@ -383,6 +401,19 @@ __all__ = [
     "resolve_endpoint",
     "settle_exchange",
     "validate_output",
+    # tools (the gears, published to a model and executed through the bridge)
+    "FIELD_SCHEMAS",
+    "GEAR_TOOL_PREFIX",
+    "IRREVERSIBLE_GEARS",
+    "GearToolRunner",
+    "ToolCallOutcome",
+    "gear_for_tool",
+    "gear_tools",
+    "tool_name_for",
+    "DEFAULT_MAX_STEPS",
+    "DEFAULT_MAX_TOOL_CALLS",
+    "LoopResult",
+    "ToolLoop",
     # locking
     "CapsuleLock",
     "LockInfo",

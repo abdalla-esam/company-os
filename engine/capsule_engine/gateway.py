@@ -94,6 +94,109 @@ DEFAULT_TIER_MODELS: dict[str, str] = {
 COPY_TEMPERATURE = 0.4
 IMAGE_TEMPERATURE = 0.2
 REVIEW_TEMPERATURE = 0.0  # verdicts must be as deterministic as possible
+TOOL_TEMPERATURE = 0.2  # tool selection favours consistency over flourish
+
+#: A single turn may request at most this many tools. Bounded so a model cannot
+#: turn one answer into an unbounded fan-out of paid gear calls.
+MAX_TOOL_CALLS_PER_TURN = 8
+#: Argument payload cap per call, mirroring the bridge's own input budget.
+MAX_TOOL_ARGUMENT_CHARS = 400_000
+
+
+def _normalise_tool_calls(raw: object) -> list[dict[str, Any]]:
+    """Validate an assistant ``tool_calls`` array; refuse anything malformed.
+
+    Returns a list of ``{"id", "name", "arguments"}`` where ``arguments`` is the
+    raw JSON **string** exactly as the model produced it (parsed later, by the
+    loop, so a parse error is attributable to one call instead of the turn).
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise GatewayResponseError(
+            f"tool_calls must be a list, got {type(raw).__name__}"
+        )
+    if len(raw) > MAX_TOOL_CALLS_PER_TURN:
+        raise GatewayResponseError(
+            f"tool_calls holds {len(raw)} calls, above the limit of {MAX_TOOL_CALLS_PER_TURN}"
+        )
+    clean: list[dict[str, Any]] = []
+    for index, call in enumerate(raw):
+        if not isinstance(call, dict):
+            raise GatewayResponseError(
+                f"tool_calls[{index}] must be an object, got {type(call).__name__}"
+            )
+        function = call.get("function")
+        if not isinstance(function, dict):
+            raise GatewayResponseError(f"tool_calls[{index}].function must be an object")
+        name = function.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise GatewayResponseError(f"tool_calls[{index}].function.name must be a non-empty string")
+        arguments = function.get("arguments")
+        if arguments is None:
+            arguments = "{}"
+        if not isinstance(arguments, str):
+            # Some providers return an object; accept it, canonically encoded.
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
+            else:
+                raise GatewayResponseError(
+                    f"tool_calls[{index}].function.arguments must be a JSON string"
+                )
+        if len(arguments) > MAX_TOOL_ARGUMENT_CHARS:
+            raise GatewayResponseError(
+                f"tool_calls[{index}].function.arguments exceed {MAX_TOOL_ARGUMENT_CHARS} characters"
+            )
+        call_id = call.get("id")
+        if not isinstance(call_id, str) or not call_id.strip():
+            call_id = f"call_{index}"
+        clean.append({"id": call_id, "name": name.strip(), "arguments": arguments})
+    return clean
+
+
+class AssistantTurn:
+    """One model answer: text, requested tools, and what it cost.
+
+    ``content`` is ``""`` when the model only asked for tools. ``tool_calls``
+    are normalised by :func:`_normalise_tool_calls`. ``usage`` is the turn's
+    token counters (never ``None`` after a successful call).
+    """
+
+    __slots__ = ("content", "tool_calls", "usage")
+
+    def __init__(
+        self,
+        content: str,
+        tool_calls: list[dict[str, Any]],
+        usage: dict[str, int],
+    ) -> None:
+        self.content = content
+        self.tool_calls = tool_calls
+        self.usage = usage
+
+    @property
+    def wants_tools(self) -> bool:
+        return bool(self.tool_calls)
+
+    def as_message(self) -> dict[str, Any]:
+        """The assistant message to append to the transcript."""
+        message: dict[str, Any] = {"role": "assistant", "content": self.content or None}
+        if self.tool_calls:
+            message["tool_calls"] = [
+                {
+                    "id": call["id"],
+                    "type": "function",
+                    "function": {"name": call["name"], "arguments": call["arguments"]},
+                }
+                for call in self.tool_calls
+            ]
+        return message
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return (
+            f"AssistantTurn(content={self.content[:40]!r}, "
+            f"tool_calls={len(self.tool_calls)}, usage={self.usage})"
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -253,6 +356,7 @@ class ModelGateway:
         self._max_retries = max(0, int(max_retries))
         self._base_backoff = max(0.0, float(base_backoff))
         self._last_usage: dict[str, int] | None = None
+        self._last_tool_calls: list[dict[str, Any]] = []
         # Spend attribution (spend_control): the branch that pays, and the
         # provider label recorded on every ledger event.
         self._spend_domain: str | None = None
@@ -294,6 +398,78 @@ class ModelGateway:
         """
         usage = getattr(self, "_last_usage", None)
         return dict(usage) if isinstance(usage, dict) else None
+
+    @property
+    def last_tool_calls(self) -> list[dict[str, Any]]:
+        """Tool calls requested by the most recent :meth:`complete_turn`."""
+        return list(getattr(self, "_last_tool_calls", []) or [])
+
+    # ------------------------------------------------------------------ #
+    # the tool-aware turn
+    # ------------------------------------------------------------------ #
+
+    def complete_turn(
+        self,
+        manifest: dict[str, Any],
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        temperature: float = TOOL_TEMPERATURE,
+    ) -> AssistantTurn:
+        """One model turn that may request tools, with tier fallback.
+
+        Unlike :meth:`complete`, an answer carrying only tool calls is a
+        success: ``content`` is ``""`` and ``tool_calls`` is populated. The
+        caller (:class:`capsule_engine.tool_loop.ToolLoop`) executes them and
+        calls back.
+
+        Spend attribution and tier resolution are identical to :meth:`complete`
+        — this is the same seam, one answer richer.
+        """
+        tier, fallback_tier = self._requirements(manifest)
+        primary_model = self._model_for(tier)
+        total: dict[str, int] = {key: 0 for key in USAGE_KEYS}
+        self._last_usage = None
+        declared_domain = manifest.get("domain") if isinstance(manifest, dict) else None
+        self.spend_domain(declared_domain)
+        try:
+            text = self._call_llm(
+                messages, primary_model, temperature, tools=tools
+            )
+            _add_usage(total, self._last_usage)
+            self._last_usage = total
+            return AssistantTurn(text, self.last_tool_calls, dict(total))
+        except SpendCapExceeded:
+            raise
+        except GatewayError as primary_error:
+            _add_usage(total, self._last_usage)
+            fallback_model = self._model_for(fallback_tier)
+            if fallback_model == primary_model:
+                self._last_usage = total
+                raise
+            logger.warning(
+                "gateway: primary model %s failed (%s) — trying fallback %s",
+                primary_model,
+                primary_error,
+                fallback_model,
+            )
+            try:
+                text = self._call_llm(
+                    messages, fallback_model, temperature, tools=tools
+                )
+                _add_usage(total, self._last_usage)
+                self._last_usage = total
+                return AssistantTurn(text, self.last_tool_calls, dict(total))
+            except SpendCapExceeded:
+                raise
+            except GatewayError as fallback_error:
+                _add_usage(total, self._last_usage)
+                self._last_usage = total
+                raise GatewayError(
+                    "primary and fallback model tiers both failed: "
+                    f"{primary_model} ({type(primary_error).__name__}), "
+                    f"{fallback_model} ({type(fallback_error).__name__})"
+                ) from fallback_error
 
     # ------------------------------------------------------------------ #
     # the text operation
@@ -385,6 +561,7 @@ class ModelGateway:
         timeout: float | None = None,
         max_retries: int | None = None,
         base_backoff: float | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> str:
         """POST one chat completion and return the assistant text.
 
@@ -393,18 +570,28 @@ class ModelGateway:
         Transient errors (HTTP 429, HTTP 5xx, socket/network timeouts) are
         automatically retried using exponential backoff with jitter.
 
+        ``tools`` publishes JSON-schema tool definitions to the model. When a
+        turn answers with tool calls and no text, the text is empty (``""``)
+        rather than an error — :attr:`last_tool_calls` carries the calls.
+
         Side effect: :attr:`last_usage` is reset to ``None`` and, when a 2xx
         body was decoded, set to the response's ``usage`` counters (zeros for
-        missing/malformed keys). Decoding happens before the content check so
-        even a rejected-but-billed response stays accountable.
+        missing/malformed keys). :attr:`last_tool_calls` is reset on every
+        attempt and holds the assistant's calls from the final decoded body.
+        Decoding happens before the content check so even a
+        rejected-but-billed response stays accountable.
         """
         self._last_usage = None
+        self._last_tool_calls = []
         url = f"{self._base_url}/chat/completions"
         payload = {
             "model": model,
             "messages": list(messages),
             "temperature": temperature,
         }
+        if tools:
+            payload["tools"] = list(tools)
+            payload["tool_choice"] = "auto"
         encoded_data = json.dumps(payload).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
@@ -544,18 +731,33 @@ class ModelGateway:
             ) from exc
         self._last_usage = self._extract_usage(decoded)
         try:
-            content = decoded["choices"][0]["message"]["content"]
+            message = decoded["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
             spend_control.record(reservation, status=spend_control.STATUS_FAILED)
             raise GatewayResponseError(
-                f"{model} response has no choices[0].message.content"
+                f"{model} response has no choices[0].message"
             ) from exc
-        if not isinstance(content, str) or not content.strip():
+        if not isinstance(message, dict):
+            spend_control.record(reservation, status=spend_control.STATUS_FAILED)
+            raise GatewayResponseError(
+                f"{model} response choices[0].message is {type(message).__name__}, expected object"
+            )
+        content = message.get("content")
+        calls = _normalise_tool_calls(message.get("tool_calls"))
+        if content is None:
+            content = ""
+        if not isinstance(content, str):
+            spend_control.record(reservation, status=spend_control.STATUS_FAILED)
+            raise GatewayResponseError(
+                f"{model} response content is {type(content).__name__}, expected string"
+            )
+        if not content.strip() and not calls:
             spend_control.record(reservation, status=spend_control.STATUS_FAILED)
             raise GatewayResponseError(f"{model} returned empty content")
         spend_control.record(
             reservation, status=spend_control.STATUS_SUCCEEDED, tokens=self._last_usage
         )
+        self._last_tool_calls = calls
         return content.strip()
 
     @staticmethod
@@ -611,10 +813,37 @@ class OfflineModelGateway:
     """
 
     last_usage: dict[str, int] | None = None
+    last_tool_calls: list[dict[str, Any]] = []
 
     def _zero_usage(self) -> None:
         """Mark this virtual call as a zero-token, zero-cost observation."""
         self.last_usage = {key: 0 for key in USAGE_KEYS}
+
+    def complete_turn(
+        self,
+        manifest: dict[str, Any],
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        *,
+        temperature: float = TOOL_TEMPERATURE,
+    ) -> "AssistantTurn":
+        """Answer without tools, deterministically.
+
+        The offline engine makes no tool decisions: choosing a gear is a model
+        judgement, and inventing one here would fake a capability the offline
+        mode does not have. A tool loop driven offline therefore ends on its
+        first turn — and a test that needs a tool cycle injects a scripted
+        gateway instead of pretending the offline one can reason.
+        """
+        self._zero_usage()
+        self.last_tool_calls = []
+        prompt = ""
+        for message in reversed(messages):
+            if isinstance(message, dict) and message.get("role") == "user":
+                prompt = str(message.get("content") or "")
+                break
+        text = self.complete(manifest, prompt)
+        return AssistantTurn(text, [], dict(self.last_usage or {}))
 
     def complete(self, manifest: dict[str, Any], prompt: str) -> str:
         """Return deterministic dummy Markdown derived from the manifest."""
